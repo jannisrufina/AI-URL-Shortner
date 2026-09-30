@@ -30,7 +30,7 @@ CREATE TABLE links (
 CREATE UNIQUE INDEX links_url_digest_uq ON links (url_digest);
 ```
 
-The primary key creates a unique B-tree index on `code`; this is the redirect lookup index. The unique B-tree index on `url_digest` makes repeated creates conflict on the exact-URL digest. There is no expiry index initially: redirects first look up a code, then check that row's expiry. Expired rows remain in the table. **[FR-1, FR-2, FR-9, NFR-5, NFR-7, A-1, A-3, L-3]**
+The primary key creates a unique B-tree index on `code`; this is the redirect lookup index. The unique B-tree index on `url_digest` makes repeated creates conflict on the exact-URL digest. There is no expiry index initially: redirects first look up a code, then check that row's expiry. Expired rows remain in the table. **[FR-1, FR-2, FR-9, NFR-5, NFR-7, A-1, L-3]**
 
 ### Schema initialization
 
@@ -68,7 +68,7 @@ Request:
 }
 ```
 
-`expires_at` is optional; omit it or send `null` for no requested expiry. The endpoint returns HTTP `200` for both a new mapping and a reused mapping. This avoids trying to infer insert-versus-update from PostgreSQL's `INSERT ... ON CONFLICT ... RETURNING`; the returned row is the same either way.
+`expires_at` is optional; omit it or send `null` for no requested expiry. The endpoint returns HTTP `200` for both a new mapping and a reused mapping. This avoids trying to infer insert-versus-update from PostgreSQL's `INSERT ... ON CONFLICT ... RETURNING`; the returned row is the same either way. **[FR-12]**
 
 Success response:
 
@@ -110,7 +110,7 @@ All create validation runs in the FastAPI application before the database write.
 1. **Request and rate limit:** apply the per-IP limiter to each create request using the direct socket peer IP; do not read proxy headers. **[NFR-1]**
 2. **URL text and shape:** reject raw whitespace and control characters anywhere in the submitted URL. Require a string no longer than 2,048 characters; parse it as an absolute URL with scheme `http` or `https` and a hostname. Reject malformed ports and embedded username/password credentials. **[FR-3, FR-4]**
 3. **Self-reference:** parse the hostname from the configured public base URL at startup. Reject a destination whose parsed hostname equals that root or ends in `.` plus that root, case-insensitively, independent of port and path. This check is local and performs no database lookup. Under the current configuration, the root is `jrb.sh`. **[FR-5, FR-11]**
-4. **Private/local hosts:** parse canonical literal IPv4 and IPv6 host values. Reject private, loopback, link-local, and unspecified addresses, including `0.0.0.0`. For IPv4-mapped IPv6 literals, classify the embedded IPv4 address too and reject it if it is private, loopback, link-local, or unspecified. Reject the obvious local hostname `localhost`. Do not resolve other hostnames. Legacy alternate IPv4 spellings (decimal integer, hexadecimal, or octal) are not normalized; their handling is a documented limitation and tested as such. **[FR-6, L-2]**
+4. **Private/local hosts:** parse canonical literal IPv4 and IPv6 host values. Reject private, loopback, link-local, and unspecified addresses, including `0.0.0.0`. For IPv4-mapped IPv6 literals, classify the embedded IPv4 address too and reject it if it is private, loopback, link-local, or unspecified. Reject the obvious local hostname `localhost`. Do not resolve other hostnames. Legacy alternate IPv4 spellings (decimal integer, hexadecimal, or octal) are not normalized; their handling is a documented limitation and tested as such. **[FR-6, L-2, L-5]**
 5. **Expiry:** if supplied, require a timezone-aware timestamp later than the request's creation timestamp and no more than 365 days after it. Store and compare timestamps as PostgreSQL `TIMESTAMPTZ`; a redirect is expired when `expires_at <= current time`. **[FR-7, FR-9]**
 6. **Public URL construction:** form `short_url` from the configured public base URL environment variable and the returned code. **[FR-11]**
 7. **HTML output:** rely on Jinja autoescaping for form values and results. Do not render submitted URLs through an unescaped/safe markup path. **[FR-10]**
@@ -124,7 +124,7 @@ No network request is made to the destination during validation. Full URLs are n
 3. Compute SHA-256 over the exact URL bytes and generate a seven-character Base62 candidate code. **[FR-1, A-1]**
 4. Execute one parameterized PostgreSQL statement: insert digest, candidate code, original URL, expiry, and creation time; use `ON CONFLICT (url_digest) DO UPDATE` with the expiry rule above; return the row's code, original URL, and expiry. No preliminary lookup or advisory lock is used. **[FR-1, A-2, A-3, NFR-2, NFR-7]**
 5. If insertion fails because the candidate code violates its unique constraint, generate a new code and retry. Other database errors are not treated as code collisions. **[FR-1]**
-6. Construct the short URL from the configured public base, return HTTP `200`, and render the same result in the form flow. The status does not distinguish insert from reuse. **[FR-10, FR-11]**
+6. Construct the short URL from the configured public base, return HTTP `200`, and render the same result in the form flow. The status does not distinguish insert from reuse. **[FR-10, FR-11, FR-12]**
 
 The unique digest index arbitrates concurrent requests for the same exact URL. PostgreSQL applies the conflict update atomically, so both requests return the same persisted code. **[FR-1, NFR-7]**
 
@@ -150,15 +150,15 @@ Use an in-process sliding window keyed by direct client IP, storing request time
 
 ## Test Plan
 
-- **URL validation unit tests:** accepted HTTP/HTTPS forms; raw whitespace and control characters; invalid schemes, malformed values, overlength URLs, credentials, configured-base hostname and subdomains with varying case/ports/paths, canonical private/loopback/link-local/unspecified IPs including `0.0.0.0`, IPv4-mapped IPv6 literals, and `localhost`. Add characterization cases for decimal (`2130706433`), hexadecimal (`0x7f000001`), and octal-like (`0177.0.0.1`) IPv4 spellings and document that normalization/rejection is not guaranteed. Confirm no DNS lookup occurs. **[FR-3, FR-4, FR-5, FR-6, FR-11, L-2]**
+- **URL validation unit tests:** accepted HTTP/HTTPS forms; raw whitespace and control characters; invalid schemes, malformed values, overlength URLs, credentials, configured-base hostname and subdomains with varying case/ports/paths, canonical private/loopback/link-local/unspecified IPs including `0.0.0.0`, IPv4-mapped IPv6 literals, and `localhost`. Add characterization cases for decimal (`2130706433`), hexadecimal (`0x7f000001`), and octal-like (`0177.0.0.1`) IPv4 spellings and document that normalization/rejection is not guaranteed. Confirm no DNS lookup occurs. **[FR-3, FR-4, FR-5, FR-6, FR-11, L-2, L-5]**
 - **Expiry unit tests:** missing expiry, future expiry, exact-now expiry, past expiry, 365-day boundary, beyond-boundary, repeated-create combinations, and revival of expired mappings. **[FR-7, FR-9, A-2, A-3, L-4]**
 - **PostgreSQL integration tests:** schema constraints; create and repeat the same exact URL; digest equality; same code on reuse; expiry update semantics; concurrent same-URL creates; code-collision retry; parameterized lookup by code; retained expired rows. **[FR-1, FR-2, FR-9, NFR-2, NFR-5, NFR-7, A-1, A-2, A-3, L-3]**
-- **API tests:** create success returns `200` for both new and reused mappings; validation errors return `422`; limiter returns `429`; redirects return `302`; expired/missing links return `404`; simulated database outage returns `503`. **[FR-8, FR-9, NFR-1]**
+- **API tests:** create success returns `200` for both new and reused mappings; validation errors return `422`; limiter returns `429`; redirects return `302`; expired/missing links return `404`; simulated database outage returns `503`. **[FR-8, FR-9, FR-12, NFR-1]**
 - **UI tests:** form is available at `/`, successful result and validation errors render safely, and HTML escaping prevents submitted values from being interpreted as markup. **[FR-10]**
-- **Limiter tests:** ten requests within a rolling minute are allowed and the next is rejected; old timestamps and inactive IP state are cleaned up; direct peer IP is used rather than forwarded headers. **[NFR-1, L-1]**
+- **Limiter tests:** ten requests within a rolling minute are allowed and the next is rejected; old timestamps and inactive IP state are cleaned up; direct peer IP is used rather than forwarded headers. **[NFR-1, L-1, L-6]**
 - **Compose smoke test:** start the one-service PostgreSQL Compose configuration, initialize the schema, run the application, and exercise create and redirect end to end. **[NFR-6]**
 - **Database timeout/pool tests:** verify bounded pool configuration, pool-acquisition timeout, connection timeout handling, statement timeout cancellation/rollback, and sanitized `503` responses. **[NFR-2, NFR-3, NFR-4, NFR-6]**
-- **Performance test:** with a documented machine, dataset, and traffic profile, measure server-side p99 for redirects and creates. Benchmark indexed redirect lookup at the expected data scale; if redirect p99 misses 200 ms, evaluate caching as a later change. **[NFR-3, NFR-4, NFR-5, A-4, A-5, A-6, A-7]**
+- **Performance test:** with a documented machine, dataset, and traffic profile, measure server-side p99 for redirects and creates. Use average redirect load in A-6 (about 100 requests/second) for the NFR-3 pass/fail result, including pool acquisition; measure peak load in A-6 (about 1,000 requests/second) separately and report it without using it as a pass/fail target. Include the expected 100:1 read-to-write ratio from A-5 in the mixed workload where practical. Measure creates under A-7. Benchmark indexed lookup at the expected data scale; if average-load redirect p99 misses 200 ms, evaluate caching as a later change. **[NFR-3, NFR-4, NFR-5, A-4, A-5, A-6, A-7, A-8]**
 
 ## Limitations
 
@@ -170,8 +170,8 @@ Use an in-process sliding window keyed by direct client IP, storing request time
 - Click analytics are not implemented; only the designated future hook point is retained. **[Out of scope: click analytics]**
 - Malicious URL reputation checks are not implemented. **[Out of scope: malicious URL detection]**
 - A SHA-256 collision is not separately checked by design, consistent with the no-full-URL-comparison decision. **[NFR-7]**
-- If deployed behind a proxy while forwarded headers remain untrusted, all requests may appear to come from the proxy's IP and share one rate-limit bucket. **[NFR-1]**
-- Alternate decimal, hexadecimal, and octal-like IPv4 host spellings are not normalized and may bypass literal-IP classification. **[FR-6]**
+- If deployed behind a proxy while forwarded headers remain untrusted, all requests may appear to come from the proxy's IP and share one rate-limit bucket. **[NFR-1, L-6]**
+- Alternate decimal, hexadecimal, and octal-like IPv4 host spellings are not normalized and may bypass literal-IP classification. **[FR-6, L-5]**
 
 ## Assumptions for Review
 
@@ -185,4 +185,4 @@ Use an in-process sliding window keyed by direct client IP, storing request time
 - **S-8:** A SHA-256 collision is treated as negligible; the application does not compare the stored full URL on digest conflict, as explicitly decided.
 - **S-9:** The hostname in `PUBLIC_BASE_URL` is the self-reference root and is configured as `jrb.sh` for this deployment. A different configured root would require revisiting FR-5.
 - **S-10:** Initial database defaults are pool min/max 1/10, pool wait 250 ms, connect timeout 2 seconds, and statement timeout 1 second; benchmark results may justify changing them.
-- **S-11:** Alternate decimal, hexadecimal, and octal-like IPv4 spellings are characterized in tests but are not normalized or guaranteed to be rejected in the initial build.
+- **S-11:** Alternate decimal, hexadecimal, and octal-like IPv4 spellings are characterized in tests but are not normalized or guaranteed to be rejected in the initial build. **[L-5]**
