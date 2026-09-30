@@ -1470,3 +1470,146 @@ The validator follows the requested rule order, returns accepted URLs unchanged,
 **Verification:** All quality gates pass, and pytest passes **65 tests**, including the five PostgreSQL integration tests. `git diff --check` is clean. The isolated test container was stopped; its volume was preserved. No commit or push was made.
 
 Made changes.
+
+##### Note:
+Ran some sample URLS. URL's that should have been rejected were accepted:
+PS C:\Git\AI-URL-Shortner> .\.venv\Scripts\python.exe
+Python 3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)] on win32
+Type "help", "copyright", "credits" or "license" for more information.
+>>> from url_shortener.validation import validate_url
+>>> for u in [r"http://jrb.sh\path", r"http://127.0.0.1\x", "http://jrb%2Esh/", "http://127%2E0%2E0%2E1/", "http://\uff4a\uff52\uff42.\uff53\uff48/"]:
+...     try:
+...         print("ACCEPTED", validate_url(u, "jrb.sh"))
+...     except Exception as e:
+...         print("REJECTED", e.code)
+...
+ACCEPTED http://jrb.sh\path
+ACCEPTED http://127.0.0.1\x
+ACCEPTED http://jrb%2Esh/
+ACCEPTED http://127%2E0%2E0%2E1/
+ACCEPTED http://ｊｒｂ.ｓｈ/
+
+### Prompt:
+Task 4 follow-up. Do not modify docs/. Do not commit or push.
+
+1. First, WITHOUT changing validation.py, run these through
+   validate_url(url, "jrb.sh") and report accepted or the error code:
+   http://jrb.sh\path, http://localhost\foo, http://127.0.0.1\x,
+   http://jrb%2Esh/, http://127%2E0%2E0%2E1/, http://ｊｒｂ.ｓｈ/,
+   http://exam%70le.com/, http://xn--e1afmkfd.xn--p1ai/.
+2. Fix what is accepted but should not be:
+   - reject any backslash anywhere in the URL (invalid_url);
+   - after the literal-IP attempt fails, require the hostname to match
+     ^[a-z0-9_-]+(\.[a-z0-9_-]+)*$ (after lowercasing and stripping a
+     trailing dot); otherwise invalid_url. Punycode (xn--) must still pass;
+   - run the 2,048-character length check first.
+   Tell me if any rule is too strict and why.
+3. Add tests: each input above (rejected ones assert invalid_url and that the
+   URL is not in the message); leading and trailing whitespace, \r, \x7f,
+   \u00a0, \u2028 inside a URL; a URL of exactly 2,048 characters (accepted);
+   characterization tests (accepted, commented as known gaps) for 100.64.0.1
+   and 224.0.0.1; [::], [fc00::1], [::ffff:10.0.0.1] rejected; 172.31.255.255
+   rejected and 172.32.0.1 accepted.
+4. Make the no-database-import test also catch relative imports and
+   "from url_shortener import database".
+All four quality gates and pytest must pass; no global suppressions. List every
+file changed and any decision I should review.
+
+#### Response:
+I’ll inspect the current validator and tests without editing them, then run the eight supplied URLs through `validate_url(url, "jrb.sh")` and report their current outcomes. Only after that baseline will I implement the requested checks and tests; I won’t touch `docs` or commit/push.
+
+Read 
+
+Read 
+
+The current validator uses `urlsplit`’s permissive backslash/Unicode handling and returns any non-IP hostname unchanged. I’ll run the exact eight probes unchanged now and record each accepted/error-code result.
+
+Ran terminal command: @'
+from url_shortener.validation import URLValidationError, validate_url
+
+urls = [
+    r"http://jrb.sh\path",
+    r"http://localhost\foo",
+    r"http://127.0.0.1\x",
+    "http://jrb%2Esh/",
+    "http://127%2E0%2E0%2E1/",
+    "http://ｊｒｂ.ｓｈ/",
+    "http://exam%70le.com/",
+    "http://xn--e1afmkfd.xn--p1ai/",
+]
+for url in urls:
+    try:
+        validate_url(url, "jrb.sh")
+    except URLValidationError as error:
+        print(f"{url!r}: {error.code}")
+    else:
+        print(f"{url!r}: ACCEPTED")
+'@ | .\.venv\Scripts\python.exe -
+
+Baseline results: the three backslash URLs, encoded-dot `jrb.sh`, encoded-dot loopback IP, and percent-encoded ordinary hostname were accepted; the fullwidth hostname was `invalid_url`; the punycode hostname was accepted. I’ll now add the length-first check, reject any backslash and non-ASCII/nonconforming hostnames, while retaining punycode ASCII labels.
+
+The routing hypothesis is confirmed by the baseline: parsing leaves encoded or backslash-containing host text for the validator, which then falls through as a non-IP hostname. I’ll close that fallthrough with the specified ASCII hostname regex after the IP attempt, and use one generic fixed `invalid_url` message for rejected hostname syntax.
+
+Generating patch (36 lines) in 
+
+
+```
+
+```
+The validator now implements the new order and hostname filter. I’m adding the specified cases for backslashes, encoded host characters, Unicode whitespace/controls, exact 2,048 length, the IP ranges, and both absolute and relative database-import spellings.
+
+Generating patch (134 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: .\.venv\Scripts\python.exe -m pytest tests/test_validation.py
+
+All 73 validator tests pass, including the new boundary, IP-gap, and import-form cases. The current behavior probe showed seven of the eight supplied URLs were accepted or malformed as previously reported; the punycode hostname was accepted as required. I’m restarting the isolated PostgreSQL project for the full quality gates and suite.
+
+Ran terminal command: $env:POSTGRES_USER = 'url_shortener'; $env:POSTGRES_PASSWORD = 'local-test-password'; $env:POSTGRES_DB = 'url_shortener_test'; $env:POSTGRES_PORT = '55432'; docker compose -p task3-validation up -d --wait postgres; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; $env:TEST_DATABASE_URL = 'postgresql://url_shortener:local-test-password@localhost:55432/url_shortener_test'; $env:REQUIRE_DB = '1'; .\.venv\Scripts\python.exe scripts/check.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m pytest
+Completed with input: $env:POSTGRES_USER = 'url_shortener'; $env:POSTGRES_PASSWORD = 'local-test-password'; $env:POSTGRES_DB = 'url_shortener_test'; $env:POSTGRES_PORT = '55432'; docker compose -p task3-validation up -d --wait postgres; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; $env:TEST_DATABASE_URL = 'postgresql://url_shortener:local-test-password@localhost:55432/url_shortener_test'; $env:REQUIRE_DB = '1'; .\.venv\Scripts\python.exe scripts/check.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m pytest
+
+The aggregate runner correctly continued through all six checks and reported both Ruff failures at the end. They are localized: the hostname-regex rejection needs explicit exception chaining (`from None`), and the AST helper needs Ruff formatting. I’m fixing those two findings, then rerunning the full command.
+
+Generating patch (9 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: .\.venv\Scripts\python.exe -m ruff format url_shortener/validation.py tests/test_validation.py; .\.venv\Scripts\python.exe -m ruff check url_shortener/validation.py tests/test_validation.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff format --check url_shortener/validation.py tests/test_validation.py
+
+Focused Ruff lint and formatting now pass. I’m rerunning the full gates and suite with `REQUIRE_DB=1` against the already healthy isolated PostgreSQL database.
+
+Ran terminal command: $env:TEST_DATABASE_URL = 'postgresql://url_shortener:local-test-password@localhost:55432/url_shortener_test'; $env:REQUIRE_DB = '1'; .\.venv\Scripts\python.exe scripts/check.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m pytest
+
+All quality gates pass, and the full suite passes 92/92 with PostgreSQL integration enabled. I’m stopping only the isolated test container and checking the final scoped diff/status to ensure only the validator and its tests changed.
+
+Ran terminal command: docker compose -p task3-validation stop postgres; $git = 'C:\Program Files\Git\cmd\git.exe'; & $git diff --check -- url_shortener/validation.py tests/test_validation.py; & $git status --short -- url_shortener/validation.py tests/test_validation.py docs; & $git diff -- url_shortener/validation.py tests/test_validation.py
+
+**Baseline probe results, before edits**
+- `http://jrb.sh\path` — accepted
+- `http://localhost\foo` — accepted
+- `http://127.0.0.1\x` — accepted
+- `http://jrb%2Esh/` — accepted
+- `http://127%2E0%2E0%2E1/` — accepted
+- `http://ｊｒｂ.ｓｈ/` — `invalid_url`
+- `http://exam%70le.com/` — accepted
+- `http://xn--e1afmkfd.xn--p1ai/` — accepted
+
+**Updated**
+The validator now checks length first, rejects backslashes, and requires non-IP hostnames to match the requested ASCII pattern after lowercasing and removing a trailing dot. Punycode hostnames remain accepted. Tests also cover the requested whitespace/control characters, exact 2,048-character acceptance, additional IP cases, known accepted CIDR gaps, and absolute/relative database-import detection.
+
+**Review note:** The specified ASCII hostname pattern intentionally rejects Unicode IDNs in their Unicode form; callers must provide punycode instead. It also intentionally rejects backslashes even in URL paths.
+
+**Files changed:** `validation.py` and `test_validation.py`. No `docs` files were changed.
+
+All quality gates pass; pytest passes **92/92**, including PostgreSQL integration tests. The isolated test container was stopped without deleting its volume. No commit or push was made.
+
+Made changes.

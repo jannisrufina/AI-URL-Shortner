@@ -45,13 +45,36 @@ def test_accepts_valid_http_urls_unchanged(url: str) -> None:
         "http://example.com:99999/path",
         "http://example.com:/path",
         "http://[::1/path",
+        r"http://jrb.sh\path",
+        r"http://localhost\foo",
+        r"http://127.0.0.1\x",
+        "http://jrb%2Esh/",
+        "http://127%2E0%2E0%2E1/",
+        "http://\uff4a\uff52\uff42.\uff53\uff48/",
+        "http://exam%70le.com/",
+        "http://\u212a.example.com/",
+        "http://[example.com]/",
+        r"http://example.com\@jrb.sh",
     ],
 )
 def test_rejects_invalid_absolute_urls(url: str) -> None:
     _assert_rejected(url, "invalid_url")
 
 
-@pytest.mark.parametrize("character", [" ", "\t", "\n", "\x00"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        " https://example.com/",
+        "https://example.com/ ",
+    ],
+)
+def test_rejects_leading_and_trailing_whitespace(url: str) -> None:
+    _assert_rejected(url, "invalid_url")
+
+
+@pytest.mark.parametrize(
+    "character", [" ", "\t", "\n", "\r", "\x00", "\x7f", "\u00a0", "\u2028"]
+)
 def test_rejects_raw_whitespace_and_control_characters(character: str) -> None:
     url = f"https://example.com/a{character}b"
     _assert_rejected(url, "invalid_url")
@@ -61,6 +84,14 @@ def test_rejects_overlength_url_before_parsing() -> None:
     url = "https://example.com/" + ("a" * 2029)
     assert len(url) == 2049
     _assert_rejected(url, "url_too_long")
+
+
+def test_accepts_url_at_maximum_length() -> None:
+    prefix = "https://example.com/"
+    url = prefix + ("a" * (2048 - len(prefix)))
+
+    assert len(url) == 2048
+    assert validate_url(url, SELF_ROOT) == url
 
 
 @pytest.mark.parametrize(
@@ -127,9 +158,41 @@ def test_rejects_private_loopback_and_local_hosts(url: str) -> None:
 @pytest.mark.parametrize(
     "url",
     [
+        "http://[::]/",
+        "http://[fc00::1]/",
+        "http://[::ffff:10.0.0.1]/",
+        "http://172.31.255.255/",
+    ],
+)
+def test_rejects_additional_nonpublic_literal_addresses(url: str) -> None:
+    _assert_rejected(url, "private_host")
+
+
+def test_accepts_address_just_outside_private_172_range() -> None:
+    url = "http://172.32.0.1/"
+    assert validate_url(url, SELF_ROOT) == url
+
+
+def test_accepts_punycode_hostname() -> None:
+    url = "http://xn--e1afmkfd.xn--p1ai/"
+    assert validate_url(url, SELF_ROOT) == url
+
+
+@pytest.mark.parametrize("address", ["100.64.0.1", "224.0.0.1"])
+def test_cidr_classification_gaps_are_characterized(address: str) -> None:
+    # These ranges remain accepted under the explicit ipaddress flag policy.
+    url = f"http://{address}/"
+    assert validate_url(url, SELF_ROOT) == url
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
         "http://2130706433/",
         "http://0x7f000001/",
         "http://0177.0.0.1/",
+        "http://127.1/",
+        "http://0/",
     ],
 )
 def test_legacy_alternate_ipv4_forms_remain_accepted(url: str) -> None:
@@ -156,11 +219,48 @@ def test_validation_module_does_not_import_database() -> None:
     root = Path(__file__).resolve().parents[1]
     source = (root / "url_shortener" / "validation.py").read_text(encoding="utf-8")
     module = ast.parse(source)
-    imports_database = any(
-        isinstance(node, ast.ImportFrom)
-        and node.module == "url_shortener.database"
-        or isinstance(node, ast.Import)
-        and any(alias.name == "url_shortener.database" for alias in node.names)
-        for node in ast.walk(module)
-    )
-    assert not imports_database
+    assert not _imports_database(module)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import url_shortener.database",
+        "from url_shortener.database import Database",
+        "from url_shortener import database",
+        "from .database import Database",
+        "from . import database",
+        "from ..url_shortener import database",
+    ],
+)
+def test_database_import_detector_catches_absolute_and_relative_imports(
+    source: str,
+) -> None:
+    assert _imports_database(ast.parse(source))
+
+
+def _imports_database(module: ast.Module) -> bool:
+    for node in ast.walk(module):
+        if isinstance(node, ast.Import):
+            if any(
+                alias.name == "url_shortener.database"
+                or alias.name.startswith("url_shortener.database.")
+                for alias in node.names
+            ):
+                return True
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == "url_shortener.database":
+                return True
+            if node.module == "database" and node.level > 0:
+                return True
+            if node.module == "url_shortener" and any(
+                alias.name == "database" for alias in node.names
+            ):
+                return True
+            if (
+                node.level > 0
+                and node.module is None
+                and any(alias.name == "database" for alias in node.names)
+            ):
+                return True
+    return False

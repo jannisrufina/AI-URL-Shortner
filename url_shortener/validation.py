@@ -1,4 +1,5 @@
 import ipaddress
+import re
 import unicodedata
 from urllib.parse import urlsplit
 
@@ -12,16 +13,19 @@ class URLValidationError(ValueError):
 
 def validate_url(submitted_url: str, self_reference_root: str) -> str:
     """Validate an absolute HTTP(S) URL without resolving or fetching its host."""
+    if len(submitted_url) > 2048:
+        raise URLValidationError("url_too_long", "URL must be at most 2048 characters.")
+
     if any(
-        character.isspace() or unicodedata.category(character) == "Cc"
+        character == "\\"
+        or character.isspace()
+        or unicodedata.category(character) == "Cc"
         for character in submitted_url
     ):
         raise URLValidationError(
-            "invalid_url", "URL must not contain whitespace or control characters."
+            "invalid_url",
+            "URL must not contain backslashes, whitespace, or control characters.",
         )
-
-    if len(submitted_url) > 2048:
-        raise URLValidationError("url_too_long", "URL must be at most 2048 characters.")
 
     try:
         parsed = urlsplit(submitted_url)
@@ -34,6 +38,9 @@ def validate_url(submitted_url: str, self_reference_root: str) -> str:
         raise URLValidationError(
             "invalid_url", "URL must be an absolute HTTP or HTTPS URL with a hostname."
         )
+
+    if not parsed.netloc.isascii():
+        raise URLValidationError("invalid_url", "URL hostname is malformed.")
 
     authority = parsed.netloc.rsplit("@", maxsplit=1)[-1]
     if authority.endswith(":") and port is None:
@@ -61,6 +68,10 @@ def validate_url(submitted_url: str, self_reference_root: str) -> str:
     try:
         address = ipaddress.ip_address(normalized_hostname)
     except ValueError:
+        if not re.fullmatch(r"[a-z0-9_-]+(?:\.[a-z0-9_-]+)*", normalized_hostname):
+            raise URLValidationError(
+                "invalid_url", "URL hostname is malformed."
+            ) from None
         return submitted_url
 
     addresses = [address]
