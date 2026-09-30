@@ -1617,3 +1617,169 @@ The validator now checks length first, rejects backslashes, and requires non-IP 
 All quality gates pass; pytest passes **92/92**, including PostgreSQL integration tests. The isolated test container was stopped without deleting its volume. No commit or push was made.
 
 Made changes.
+
+## Task 5:
+### Prompt:
+Task 5 from docs/tasks.md: Implement the in-process create limiter. Read
+docs/tasks.md (Task 5), docs/design.md (Rate Limiter, Errors), and
+docs/requirements.md (NFR-1, L-1, L-6) first. Do not modify anything in docs/.
+Do not commit or push.
+
+Intent: a per-direct-client-IP sliding-window limiter (10 requests per rolling
+60 seconds) that later create endpoints will use. No real create endpoints yet.
+
+Scope:
+- A limiter class: thread-safe (a lock), keyed by client IP, storing
+  timestamps per IP in a deque. On each call: drop timestamps at least 60 s
+  old, reject if 10 remain, otherwise record the current one. Rejected
+  requests do not consume a slot. Take an injectable clock (default
+  time.monotonic) so tests need no sleeping.
+- Cleanup: prune inactive IP entries so memory does not grow without bound
+  (for example, sweep periodically or when the map exceeds a size threshold);
+  explain the approach in a comment.
+- A FastAPI dependency that reads request.client.host (the direct peer IP;
+  handle client being None), calls the limiter, and raises HTTP 429 with the
+  standard error body {"error": {"code": "rate_limited", "message": "..."}}
+  (fixed message, no URL, no IP). Do not read X-Forwarded-For, Forwarded, or
+  X-Real-IP.
+- Per assumption S-6, every create attempt consumes a slot, even one that
+  later fails validation, so the dependency runs before validation.
+- Add `--no-proxy-headers` to the Uvicorn command in the README (uvicorn trusts
+  forwarded headers from 127.0.0.1 by default, which would let a local client
+  spoof its IP). Note this next to L-6.
+- Do NOT add real endpoints. Tests may use a tiny test-only FastAPI app defined
+  inside the test file. No new dependencies.
+
+Tests (all must pass; use the injected clock, no sleeps):
+- 10 requests admitted, the 11th rejected with 429 and the standard body.
+- Window slides: after 60 s, requests are admitted again; rejected requests
+  do not extend the window.
+- Different IPs have independent buckets.
+- Forwarded headers (X-Forwarded-For, Forwarded, X-Real-IP) are ignored:
+  varying them from one peer IP does not split its bucket.
+- Cleanup removes idle IP entries and keeps active ones.
+- client is None is handled without crashing.
+- The 429 body contains no IP address and no URL.
+- Thread-safety smoke test: many threads hitting one IP admit exactly 10.
+
+Constraints:
+- All four quality gates pass (python scripts/check.py) plus pytest; no global
+  suppressions.
+- Document in a comment/README that the limiter is single-process and resets
+  on restart (L-1).
+
+When done, list every file created or changed, and any decision I should
+review.
+
+#### Response:
+I’ll read Task 5, the design’s limiter/error contracts, and the specified requirements first. Then I’ll inspect the current app/settings/tests and README, since the recent validator edits and existing scaffold must be preserved; no `docs` files will be touched.
+
+Read , lines 85 to 125
+
+Read 
+
+Read 
+
+Read , lines 90 to 110
+
+Read , lines 14 to 42
+
+Read , lines 50 to 94
+
+Read , lines 143 to 155
+
+Read 
+
+I’ll put the limiter in its own module, attach one instance to each FastAPI app factory, and expose a dependency plus a fixed 429 handler without adding endpoints. For `client is None`, I’ll use a shared `"unknown"` bucket so missing peer information is handled safely rather than bypassing the limit; the README will also document single-process/reset behavior and Uvicorn’s `--no-proxy-headers`.
+
+Created 
+
+Generating patch (21 lines) in 
+
+
+```
+
+```
+The app factory now owns one limiter instance and has the fixed 429 handler registered, but it still exposes no routes. I’m adding deterministic clock-based tests through the dependency and direct limiter API, including headers, cleanup, missing client, body redaction, and concurrent calls.
+
+Created 
+
+The limiter tests are in place with an injected clock and a thread-safety exercise. I’m running focused lint and tests now; this should catch any interface or response-shape mismatch before the full suite.
+
+Ran terminal command: .\.venv\Scripts\python.exe -m ruff check url_shortener/rate_limiter.py url_shortener/app.py tests/test_rate_limiter.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m pytest tests/test_rate_limiter.py
+Completed with input: .\.venv\Scripts\python.exe -m ruff check url_shortener/rate_limiter.py url_shortener/app.py tests/test_rate_limiter.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m pytest tests/test_rate_limiter.py
+
+Ruff found only import ordering and two unused test imports. I’m applying Ruff’s safe import fix and rerunning the same focused checks.
+
+Ran terminal command: .\.venv\Scripts\python.exe -m ruff check --fix tests/test_rate_limiter.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff check url_shortener/rate_limiter.py url_shortener/app.py tests/test_rate_limiter.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff format --check url_shortener/rate_limiter.py url_shortener/app.py tests/test_rate_limiter.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m pytest tests/test_rate_limiter.py
+
+Focused checks now pass: seven limiter tests cover rolling-window, IP isolation, proxy-header ignoring, cleanup, missing client, response body, and concurrent admission. I’m updating the existing README’s Uvicorn command with `--no-proxy-headers` and documenting L-1/L-6 beside it; no endpoint or docs file will be added.
+
+Generating patch (16 lines) in 
+
+
+```
+
+```
+One concurrency edge surfaced during review: sampling the clock before acquiring the lock could let threads append timestamps out of order if they acquire the lock in a different order. I’m moving the clock read inside the critical section so each per-IP deque remains chronological under concurrent calls, then I’ll rerun limiter tests.
+
+Generating patch (10 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: .\.venv\Scripts\python.exe -m pytest tests/test_rate_limiter.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff check url_shortener/rate_limiter.py tests/test_rate_limiter.py README.md
+
+The limiter tests still pass after the lock-order fix, and focused lint is clean. I’m starting the isolated PostgreSQL service once more so the full repository suite can run without integration skips, then I’ll run all gates and pytest.
+
+Ran terminal command: $env:POSTGRES_USER = 'url_shortener'; $env:POSTGRES_PASSWORD = 'local-test-password'; $env:POSTGRES_DB = 'url_shortener_test'; $env:POSTGRES_PORT = '55432'; docker compose -p task3-validation up -d --wait postgres; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; docker compose -p task3-validation exec -T postgres pg_isready -U url_shortener -d url_shortener_test
+
+Ran terminal command: $env:TEST_DATABASE_URL = 'postgresql://url_shortener:local-test-password@localhost:55432/url_shortener_test'; $env:REQUIRE_DB = '1'; .\.venv\Scripts\python.exe scripts/check.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m pytest
+Completed with input: $env:TEST_DATABASE_URL = 'postgresql://url_shortener:local-test-password@localhost:55432/url_shortener_test'; $env:REQUIRE_DB = '1'; .\.venv\Scripts\python.exe scripts/check.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m pytest
+
+The full runner exposed four strict-mypy issues in the handler annotation and Starlette’s `bytes | memoryview` response-body type. All other gates pass; I’m adjusting the handler to Starlette’s `Exception` signature and normalizing the test body to bytes, then I’ll rerun mypy and the suite.
+
+Generating patch (21 lines) in , 
+
+
+```
+
+```
+
+```
+
+```
+The handler and response typing changes are applied. I’m running strict mypy plus limiter tests immediately to confirm this slice before rerunning the full quality runner.
+
+Ran terminal command: .\.venv\Scripts\python.exe -m mypy; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m pytest tests/test_rate_limiter.py
+
+Strict mypy is clean and all seven limiter-specific tests pass. I’m now rerunning the shared gate script and full test suite with PostgreSQL required, then I’ll verify only the limiter module, app wiring, its tests, and README changed.
+
+Ran terminal command: .\.venv\Scripts\python.exe scripts/check.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m pytest
+
+All quality gates pass; the current full run has 100 passing tests and five PostgreSQL integration tests skipped because this shell lacked `TEST_DATABASE_URL`. I’m rerunning once with the isolated test database and `REQUIRE_DB=1` so the final count includes real database tests.
+
+Ran terminal command: $env:POSTGRES_USER = 'url_shortener'; $env:POSTGRES_PASSWORD = 'local-test-password'; $env:POSTGRES_DB = 'url_shortener_test'; $env:POSTGRES_PORT = '55432'; docker compose -p task3-validation up -d --wait postgres; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; $env:TEST_DATABASE_URL = 'postgresql://url_shortener:local-test-password@localhost:55432/url_shortener_test'; $env:REQUIRE_DB = '1'; .\.venv\Scripts\python.exe -m pytest
+
+All 105 tests now pass with PostgreSQL required. I’m stopping the isolated container without deleting its volume and checking the final scoped worktree diff to identify every changed file and confirm no `docs` paths were edited.
+
+Ran terminal command: docker compose -p task3-validation stop postgres; $git = 'C:\Program Files\Git\cmd\git.exe'; & $git diff --check -- url_shortener/rate_limiter.py url_shortener/app.py tests/test_rate_limiter.py README.md; & $git status --short -- url_shortener/rate_limiter.py url_shortener/app.py tests/test_rate_limiter.py README.md docs; & $git diff -- url_shortener/rate_limiter.py url_shortener/app.py tests/test_rate_limiter.py README.md
+
+Implemented Task 5 without adding endpoints or modifying files under `docs`.
+
+The limiter is thread-safe, uses an injected monotonic clock, and admits at most 10 requests per direct peer IP in a rolling 60-second window. Rejected requests consume no slot. It periodically sweeps inactive IP buckets every 256 calls. The FastAPI dependency reads only `request.client.host`; missing client information uses a shared `"unknown"` bucket. The fixed 429 response contains no IP or URL.
+
+**Files changed**
+- `rate_limiter.py` — limiter, dependency, and 429 response handler.
+- `app.py` — initializes one limiter per app and registers its handler; no routes added.
+- `test_rate_limiter.py` — seven deterministic limiter/dependency tests.
+- `README.md` — adds `--no-proxy-headers` and documents L-1/L-6.
+
+All quality gates pass, and all **105 tests pass**, including PostgreSQL integration tests. The isolated test container was stopped without deleting its volume. No commit or push was made.
+
+**Decision to review:** when `request.client` is `None`, requests share the `"unknown"` limiter bucket. This fails closed rather than allowing missing peer information to bypass the limit. `AI_usage_log.md` is modified in the worktree but was not touched for this task.
+
+Made changes.

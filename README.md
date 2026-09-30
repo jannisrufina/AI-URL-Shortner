@@ -76,11 +76,14 @@ $env:DB_POOL_WAIT_MS = "250"
 $env:DB_CONNECT_TIMEOUT_SECONDS = "2"
 $env:DB_STATEMENT_TIMEOUT_MS = "1000"
 python -m alembic upgrade head
-python -m uvicorn url_shortener.app:app --host 127.0.0.1 --port 8000 --workers 1
+python -m uvicorn url_shortener.app:app --host 127.0.0.1 --port 8000 --workers 1 --no-proxy-headers
 ```
 
 The 250 ms pool-acquisition wait is an overload/failure bound, not an expected
-redirect wait. For PostgreSQL integration tests, point at the separate
+redirect wait. The in-process limiter is single-process and resets on restart
+(L-1). Uvicorn runs with `--no-proxy-headers`: forwarded headers are not trusted,
+so when deployed behind a proxy, requests share the proxy's rate-limit bucket
+(L-6). For PostgreSQL integration tests, point at the separate
 disposable database created above:
 
 ```powershell
