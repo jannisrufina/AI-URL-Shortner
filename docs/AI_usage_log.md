@@ -6,7 +6,7 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 
 - **Tools:** GitHub Copilot in VS Code (requirements, design, tasks, code generation); Claude in a separate chat (planning guidance, reviewing Copilot's outputs, drafting and refining prompts). I made every decision; neither tool committed or pushed anything.
 - **Security practices:** no secrets or credentials in prompts; `.env` is ignored and only placeholder values are committed; the assignment text was shared once with the planning chat (Claude) to understand requirements and was not given to Copilot; every AI change was reviewed, tested, and run through the quality gates before I relied on it.
-- **Stages so far:** Planning (requirements, design, tasks) | Task 1 (quality gates and CI) | Task 2 (architecture overview) | Task 3 (app bootstrap, schema, pool) | Task 4 (URL validation) | Task 5 (in-process create limiter) | Task 6 (next)
+- **Stages so far:** Planning (requirements, design, tasks) | Task 1 (quality gates and CI) | Task 2 (architecture overview) | Task 3 (app bootstrap, schema, pool) | Task 4 (URL validation) | Task 5 (in-process create limiter) | Task 6 (create persistence and JSON API) | Task 7 (next)
 
 ## Decisions (what the AI proposed, what I chose, why)
 
@@ -34,6 +34,12 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | D-20 | Missing client address (Task 5) | Requests with no `request.client` share one `"unknown"` bucket | Accepted as proposed | Fails closed: missing peer information cannot be used to bypass the limit |
 | D-21 | Proxy headers (Task 5) | Uvicorn trusts forwarded headers from 127.0.0.1 by default | Run with `--no-proxy-headers`; the limiter reads only the direct peer address | A local client could otherwise spoof its address and dodge the limit (NFR-1); consequence recorded as L-6 |
 | D-22 | Accepted limiter gaps (Task 5) | Per-IP buckets keyed by the exact address; idle entries swept every 256 calls | Accept: single process and reset on restart (L-1), shared bucket behind a proxy (L-6), IPv6 clients can rotate addresses within a /64, memory bounded only by the sweeps (no hard cap) | Prototype scope; the fixes (shared store, prefix keying, size cap) are known and deferred |
+| D-23 | Sync database call in an async endpoint (Task 6) | `run_in_threadpool` around the synchronous psycopg call | Accepted | Keeps the event loop free without switching to an async driver |
+| D-24 | Code-collision retry (Task 6) | Retry only on a `links_pkey` violation, five attempts, `503 service_unavailable` when exhausted | Accepted | A digest conflict goes through `ON CONFLICT`, never the retry; timeouts are never treated as collisions |
+| D-25 | Expiry parsing (Task 6) | Strict RFC 3339 regex, then `fromisoformat`, no Pydantic coercion; result converted to UTC | Accepted | Numbers, naive timestamps, and loose ISO forms are rejected with `invalid_expiry` |
+| D-26 | Lone surrogates in URLs (Task 6) | `validate_url` only rejected whitespace and `Cc` characters | Reject Unicode category `Cs` too (my edit to a Task 4 file) | Hashing the URL to UTF-8 raised `UnicodeEncodeError` (E-23) |
+| D-27 | Accepted gaps (Task 6) | No request body size limit; `expires_at` in responses is whatever timezone the database returns | Accepted for the prototype | Legitimate bodies are small and the Docker database runs in UTC; a reverse proxy would normally cap bodies |
+| D-28 | Test client deprecation warning (Task 6) | Starlette's `TestClient` with `httpx` is deprecated in favor of a newer package | Left as is | Dependencies are pinned, tests pass, the application does not use the test client; revisit when upgrading Starlette or FastAPI |
 
 ## AI errors and gaps I caught
 
@@ -58,6 +64,11 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | E-17 | Task 5: a test named "rejected requests do not extend the window" would pass even if they did (one recorded rejection is not enough to fill the bucket) | Second-AI review of the tests | Added a test with ten rejected attempts mid-window (my edit); renamed the old test to say what it checks |
 | E-18 | Task 5: first draft sampled the clock before taking the lock, so concurrent calls could append timestamps out of order | AI's own review during the task; I confirmed the clock read is now inside the lock in my review of `rate_limiter.py` | Clock read moved inside the lock |
 | E-19 | Task 5: every test builds its own app and registers the 429 handler itself, so nothing checks that `create_app()` registers it or that a real HTTP request gets the standard body | Second-AI review | Deferred to Task 6, whose API test sends 11 requests through `create_app()` and a TestClient |
+| E-20 | Task 6: the AI's first run answered for Task 5 (limiter files, 105 tests) and changed nothing; my resent prompt was also truncated, and a permission prompt paused the next run | The summary described the wrong task, the test count was unchanged, and `git status` was clean | Restarted in a fresh session, restated that this was Task 6, and approved the permission prompt |
+| E-21 | Task 6: the collision test inserted a fixed code (`Collide`), so it passed once and failed on every rerun against a persistent test database; the concurrency test had no simultaneous start and used a 250 ms pool wait for 20 threads on a 10-connection pool | Second-AI review of the test file; second run failed with `Key (code)=(Collide) already exists` | Random codes; `threading.Barrier` and a 2000 ms pool wait in that test only (my edits); integration tests now pass on repeated runs |
+| E-22 | Task 6: malformed-JSON handling caught only `ValueError`, so deeply nested JSON would raise `RecursionError` and return a 500 instead of the standard 422 | Second-AI review of `app.py` | Catch `(ValueError, RecursionError)` and add a test (my edit) [confirm the test failed before the fix] |
+| E-23 | Tasks 4 and 6: a URL containing a lone surrogate passed `validate_url`, then failed at UTF-8 encoding for the digest and would return a 500 | Second-AI review of `links.py` against `validation.py`; reproduced with a one-line script (`UnicodeEncodeError`); four new validation tests failed before the fix (4 failed, 79 passed) | Reject category `Cs` in `validate_url`; validation and API tests added (my edits, D-26) |
+| E-24 | Task 6: I pushed my review edits without rerunning the quality gates; CI failed Ruff lint and format (import order, stray whitespace) | CI run [number] | `ruff check --fix` and `ruff format`, reran all gates, pushed; CI green [number]. I now run `scripts/check.py` before every push |
 
 ## Planning
 ### Prompt: 
