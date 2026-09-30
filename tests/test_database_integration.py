@@ -362,13 +362,15 @@ def test_expired_redirect_is_404_and_row_remains_stored(database_url: str) -> No
     database.open()
     submitted_url = f"https://example.test/expired/{uuid4().hex}"
     created_at = datetime.now(UTC)
-    expired = create_or_reuse_link(
-        database,
-        submitted_url,
-        created_at - timedelta(seconds=1),
-        created_at,
-    )
-    database.close()
+    try:
+        expired = create_or_reuse_link(
+            database,
+            submitted_url,
+            created_at - timedelta(seconds=1),
+            created_at,
+        )
+    finally:
+        database.close()
 
     with TestClient(create_app(settings)) as client:
         response = client.get(f"/{expired.code}", follow_redirects=False)
@@ -389,13 +391,15 @@ def test_repeat_create_revives_expired_redirect(database_url: str) -> None:
     database.open()
     submitted_url = f"https://example.test/revive-redirect/{uuid4().hex}"
     created_at = datetime.now(UTC)
-    expired = create_or_reuse_link(
-        database,
-        submitted_url,
-        created_at - timedelta(seconds=1),
-        created_at,
-    )
-    database.close()
+    try:
+        expired = create_or_reuse_link(
+            database,
+            submitted_url,
+            created_at - timedelta(seconds=1),
+            created_at,
+        )
+    finally:
+        database.close()
 
     with TestClient(create_app(settings)) as client:
         before_revival = client.get(f"/{expired.code}", follow_redirects=False)
