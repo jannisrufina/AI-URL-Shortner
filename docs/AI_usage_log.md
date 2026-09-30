@@ -1315,3 +1315,158 @@ All quality gates passed, and pytest passed **19 tests**, including all five Pos
 
 Made changes.
 
+## Task 4:
+### Prompt:
+Task 4 from docs/tasks.md: Implement URL validation and public-host policy.
+Read docs/tasks.md (Task 4), docs/design.md (Validation Rules and
+Responsibility), and docs/requirements.md (FR-3, FR-4, FR-5, FR-6, FR-11, L-2,
+L-5) first. Do not modify anything in docs/. Do not commit or push.
+
+Intent: a pure validation module that decides whether a submitted URL is
+acceptable to shorten. No database, no network, no DNS lookups. No endpoints
+yet; Task 6 will call it.
+
+Scope:
+- One module in url_shortener/ exposing a validate function that takes the
+  submitted URL string and the self-reference root (the hostname parsed once
+  from the configured PUBLIC_BASE_URL setting that Task 3 already validates).
+  It returns the accepted URL unchanged, or raises a validation error with a
+  stable error code (for example invalid_url, url_too_long,
+  credentials_not_allowed, self_reference, private_host) and a fixed message.
+  Error messages must never include the submitted URL.
+- Rules, in this order:
+  1. Reject raw whitespace and control characters anywhere in the string.
+  2. Reject strings longer than 2,048 characters.
+  3. Parse as an absolute URL with scheme http or https and a hostname;
+     reject malformed ports.
+  4. Reject embedded username or password.
+  5. Self-reference: reject when the hostname, compared case-insensitively
+     with any trailing dot removed, equals the self-reference root or ends in
+     "." plus the root. Independent of port and path. No database lookup.
+  6. Private and local hosts: parse literal IPv4 and IPv6 host values and
+     reject private, loopback, link-local, and unspecified addresses
+     (including 0.0.0.0). For IPv4-mapped IPv6 literals, classify the embedded
+     IPv4 address too. Reject the hostname "localhost" and names ending in
+     ".localhost". Do not resolve any other hostname.
+  7. Legacy alternate IPv4 spellings (decimal integer such as 2130706433,
+     hexadecimal such as 0x7f000001, octal-like such as 0177.0.0.1) are NOT
+     normalized (known limitation L-5). Do not try to catch them.
+- Use only the standard library (urllib.parse, ipaddress). Add no
+  dependencies. Do not validate expiry here (Task 6) and do not add a rate
+  limiter (Task 5).
+
+Tests (all must pass; focused unit tests, use pytest parametrize):
+- Accepted: normal http and https URLs, including ports, paths, query strings.
+- Rejected: non-http(s) schemes (ftp, javascript, data, file), missing
+  hostname, malformed port, credentials, over-length (2,049 characters),
+  raw whitespace and control characters (space, tab, newline, NUL).
+- Self-reference: the root, subdomains, mixed case, trailing dot, with ports
+  and paths; and a look-alike such as notjrb.sh that must be ACCEPTED.
+- Private hosts: 127.0.0.1, 10.x, 172.16.x, 192.168.x, 169.254.x, 0.0.0.0,
+  ::1, fe80::, IPv4-mapped ::ffff:127.0.0.1, localhost, foo.localhost; and a
+  public IP such as 93.184.216.34 that must be ACCEPTED.
+- Characterization tests for 2130706433, 0x7f000001, and 0177.0.0.1: assert
+  the current behavior (accepted) and comment that this documents limitation
+  L-5, so a future fix will flip them.
+- No DNS: a test that patches socket.getaddrinfo (and gethostbyname) to fail
+  if called and validates several hostnames.
+- Errors never contain the submitted URL: assert this for each rejection.
+- Validation raises before any database access: the module must not import the
+  database module.
+
+Constraints:
+- All four quality gates must pass (python scripts/check.py) plus pytest; no
+  global suppressions.
+- Say whether you used ip.is_private/is_loopback/is_link_local/is_unspecified
+  or "not ip.is_global", and justify which. Note any ranges either choice
+  misses.
+- Keep it small and readable.
+
+When done, list every file created or changed, and any decision I should
+review.
+
+#### Response:
+I’ll read the current Task 4, validation design, and specified requirements first, then inspect the existing package/tests to avoid disturbing the Task 3 work. I’ll add only the pure validator and focused tests, with no endpoint, database import, dependency, or documentation changes.
+
+Read , lines 65 to 100
+
+Read , lines 100 to 125
+
+Read 
+
+Read 
+
+Read 
+
+I’ll implement `validate_url(url, self_reference_root)` with fixed-code/fixed-message errors and standard-library parsing only. For IP classification, I’ll use the explicit `ipaddress` flags (`is_private`, `is_loopback`, `is_link_local`, `is_unspecified`) and inspect the embedded IPv4 for mapped IPv6; this avoids the broader, less precise `not is_global` rule.
+
+Created 
+
+Created 
+
+Generating patch (8 lines) in 
+
+The validator and tests are created. A cleanup patch raced the file creation and did not apply, leaving a harmless placeholder line in the new test; I’m running Ruff now as the first focused check, then I’ll remove any lint findings and rerun.
+
+Ran terminal command: .\.venv\Scripts\python.exe -m ruff check url_shortener/validation.py tests/test_validation.py
+
+Ruff passes, but the leftover placeholder is unnecessary and obscures the test. I’m removing that one line and will rerun the focused tests immediately.
+
+Generating patch (8 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: .\.venv\Scripts\python.exe -m pytest tests/test_validation.py
+
+All 45 validation tests pass. I noticed one test constructs a 2,050-character URL instead of the requested exact 2,049-character boundary, and the direct root-with-port case deserves explicit coverage; I’m tightening those cases before the final suite.
+
+Generating patch (13 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: .\.venv\Scripts\python.exe -m pytest tests/test_validation.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff check url_shortener/validation.py tests/test_validation.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff format --check url_shortener/validation.py tests/test_validation.py
+Completed with input: .\.venv\Scripts\python.exe -m pytest tests/test_validation.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff check url_shortener/validation.py tests/test_validation.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff format --check url_shortener/validation.py tests/test_validation.py
+
+The updated boundary tests pass; Ruff formatting requests one line wrap in the validator. I’m applying that formatting change and rerunning the focused quality checks.
+
+Ran terminal command: .\.venv\Scripts\python.exe -m ruff format url_shortener/validation.py; .\.venv\Scripts\python.exe -m ruff check url_shortener/validation.py tests/test_validation.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff format --check url_shortener/validation.py tests/test_validation.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m pytest tests/test_validation.py
+
+One test currently uses `subprocess` to prove the validator doesn’t import the database; that would trigger additional Bandit rules in the test scan, which is allowed to skip only B101. I’m replacing it with a standard-library AST inspection of the validator module, preserving the no-database-import check without suppressions.
+
+Generating patch (34 lines) in 
+
+
+```
+
+```
+The test now inspects imports statically and no longer launches a subprocess. I’m rerunning the validator tests and Ruff on the changed test file before the full gate run.
+
+Ran terminal command: .\.venv\Scripts\python.exe -m pytest tests/test_validation.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff check tests/test_validation.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff format --check tests/test_validation.py
+
+All 46 validator tests pass, including exact overlength, self-reference, private-IP, mapped-IPv6, no-DNS, and no-database-import cases. I’m starting the preserved isolated Task 3 test database on port 55432 for the full suite, then I’ll run every quality gate and pytest with required integration mode enabled.
+
+Ran terminal command: $env:POSTGRES_USER = 'url_shortener'; $env:POSTGRES_PASSWORD = 'local-test-password'; $env:POSTGRES_DB = 'url_shortener_test'; $env:POSTGRES_PORT = '55432'; docker compose -p task3-validation up -d --wait postgres; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; docker compose -p task3-validation exec -T postgres pg_isready -U url_shortener -d url_shortener_test
+
+Ran terminal command: $env:TEST_DATABASE_URL = 'postgresql://url_shortener:local-test-password@localhost:55432/url_shortener_test'; $env:REQUIRE_DB = '1'; .\.venv\Scripts\python.exe scripts/check.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m pytest
+
+All four gates pass and the full suite passes 65/65, including PostgreSQL integration. I’m stopping only the isolated validation container and checking the scoped diff/status to confirm this task changed no files under `docs` or dependency files.
+
+Ran terminal command: docker compose -p task3-validation stop postgres; $git = 'C:\Program Files\Git\cmd\git.exe'; & $git diff --check -- url_shortener/validation.py tests/test_validation.py; & $git status --short -- url_shortener/validation.py tests/test_validation.py docs requirements.in requirements-dev.in requirements.txt requirements-dev.txt
+
+Implemented Task 4 by creating `validation.py` and `test_validation.py` only. No dependencies or files under `docs` were changed; the existing `AI_usage_log.md` modification was left untouched.
+
+The validator follows the requested rule order, returns accepted URLs unchanged, and raises fixed-message errors with stable codes. It uses `urllib.parse`, `ipaddress`, and `unicodedata`; it does not access the database or perform DNS lookups.
+
+**IP classification choice:** I used `is_private`, `is_loopback`, `is_link_local`, and `is_unspecified`, checking the embedded IPv4 address for IPv4-mapped IPv6. This matches the requested categories more directly than rejecting every address where `is_global` is false. One range this leaves accepted is `100.64.0.0/10` (shared carrier-grade NAT space), which Python classifies as neither private nor global.
+
+**Verification:** All quality gates pass, and pytest passes **65 tests**, including the five PostgreSQL integration tests. `git diff --check` is clean. The isolated test container was stopped; its volume was preserved. No commit or push was made.
+
+Made changes.
