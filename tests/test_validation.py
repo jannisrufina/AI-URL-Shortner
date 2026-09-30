@@ -73,6 +73,20 @@ def test_rejects_leading_and_trailing_whitespace(url: str) -> None:
 
 
 @pytest.mark.parametrize(
+    "character", 
+    [
+        "\ud800", 
+        "\udbff", 
+        "\udc00", 
+        "\udfff",
+    ],
+)
+def test_rejects_lone_surrogate_characters(character: str) -> None:
+    url = f"https://example.com/a{character}b"
+    _assert_rejected(url, "invalid_url")
+
+
+@pytest.mark.parametrize(
     "character", [" ", "\t", "\n", "\r", "\x00", "\x7f", "\u00a0", "\u2028"]
 )
 def test_rejects_raw_whitespace_and_control_characters(character: str) -> None:

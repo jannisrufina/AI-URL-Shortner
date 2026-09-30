@@ -111,7 +111,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def create_link(request: Request) -> dict[str, str | datetime | None]:
         try:
             payload = await request.json()
-        except ValueError:
+        except (ValueError, RecursionError):
             raise RequestValidationError([]) from None
 
         if not isinstance(payload, dict):

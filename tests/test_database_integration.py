@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import psycopg
 import pytest
+import threading
 from alembic.config import Config
 from fastapi.testclient import TestClient
 
@@ -209,12 +210,16 @@ def test_exact_url_reuses_code_but_case_and_slash_remain_distinct(
 def test_concurrent_same_url_creates_arbitrate_to_one_row(
     database_url: str,
 ) -> None:
-    database = Database(_base_settings(database_url, DB_POOL_MAX_SIZE="10"))
+    database = Database(
+        _base_settings(database_url, DB_POOL_MAX_SIZE="10", DB_POOL_WAIT_MS="2000")
+    )
     database.open()
     submitted_url = f"https://example.test/concurrent/{uuid4().hex}"
     created_at = datetime.now(UTC)
+    start = threading.Barrier(20)
 
     def create(_: int) -> Link:
+        start.wait(timeout=10)
         return create_or_reuse_link(database, submitted_url, None, created_at)
 
     try:
@@ -237,13 +242,14 @@ def test_concurrent_same_url_creates_arbitrate_to_one_row(
 def test_code_primary_key_collision_retries_with_new_candidate(
     database_url: str,
 ) -> None:
-    occupied_code = "Collide"
+    occupied_code = _code()
+    retry_code = _code()
     with psycopg.connect(database_url) as connection:
         _insert(connection, occupied_code, _digest())
 
     database = Database(_base_settings(database_url))
     database.open()
-    candidates = iter((occupied_code, "Retry22"))
+    candidates = iter((occupied_code, retry_code))
     generated: list[str] = []
 
     def code_generator() -> str:
@@ -263,8 +269,8 @@ def test_code_primary_key_collision_retries_with_new_candidate(
     finally:
         database.close()
 
-    assert result.code == "Retry22"
-    assert generated == [occupied_code, "Retry22"]
+    assert result.code == retry_code
+    assert generated == [occupied_code, retry_code]
 
 
 def test_expired_rows_are_retained_and_repeat_create_revives_same_code(

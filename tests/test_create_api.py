@@ -223,3 +223,31 @@ def test_failing_create_does_not_log_submitted_url(
 
     assert response.status_code == 422
     assert submitted_url not in caplog.text
+
+
+def test_lone_surrogate_in_url_returns_standard_422(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _client(monkeypatch) as client:
+        response = client.post(
+            "/api/links",
+            content=b'{"url": "https://example.com/\\ud800"}',
+            headers={"content-type": "application/json"},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_url"
+    assert "ud800" not in response.text
+
+def test_deeply_nested_json_returns_standard_422(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _client(monkeypatch) as client:
+        response = client.post(
+            "/api/links",
+            content=b"[" * 100000,
+            headers={"content-type": "application/json"},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_request"

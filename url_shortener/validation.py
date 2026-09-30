@@ -19,7 +19,7 @@ def validate_url(submitted_url: str, self_reference_root: str) -> str:
     if any(
         character == "\\"
         or character.isspace()
-        or unicodedata.category(character) == "Cc"
+        or unicodedata.category(character) in {"Cc", "Cs"}
         for character in submitted_url
     ):
         raise URLValidationError(
