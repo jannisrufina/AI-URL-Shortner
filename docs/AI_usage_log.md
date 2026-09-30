@@ -6,7 +6,7 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 
 - **Tools:** GitHub Copilot in VS Code (requirements, design, tasks, code generation); Claude in a separate chat (planning guidance, reviewing Copilot's outputs, drafting and refining prompts). I made every decision; neither tool committed or pushed anything.
 - **Security practices:** no secrets or credentials in prompts; `.env` is ignored and only placeholder values are committed; the assignment text was shared once with the planning chat (Claude) to understand requirements and was not given to Copilot; every AI change was reviewed, tested, and run through the quality gates before I relied on it.
-- **Stages so far:** Planning (requirements, design, tasks) | Task 1 (quality gates and CI) | Task 2 (architecture overview) | Task 3 (app bootstrap, schema, pool) | Task 4 (URL validation) | Task 5 (next)
+- **Stages so far:** Planning (requirements, design, tasks) | Task 1 (quality gates and CI) | Task 2 (architecture overview) | Task 3 (app bootstrap, schema, pool) | Task 4 (URL validation) | Task 5 (in-process create limiter) | Task 6 (next)
 
 ## Decisions (what the AI proposed, what I chose, why)
 
@@ -31,6 +31,9 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | D-17 | Test database and defaults (Task 3) | Separate `url_shortener_test` database; `DB_*` setting names; `postgres:16-alpine` image | Accepted as proposed | Tests must not touch application data; defaults match the design |
 | D-18 | Hostname strictness (Task 4) | `urlsplit` parsing with equality and IP-form checks | Add an ASCII hostname allowlist (punycode allowed), reject backslashes, and reject a non-ASCII authority | Browsers and Python parse these inputs differently; an allowlist closes the whole class instead of chasing individual characters |
 | D-19 | Accepted gaps (Task 4) | Explicit `ipaddress` flags (`is_private`, `is_loopback`, `is_link_local`, `is_unspecified`) | Accept L-5 (alternate IPv4 spellings), the CGNAT (`100.64.0.0/10`) and multicast ranges, and numeric shorthand hosts (`127.1`, `0`); known fix deferred: reject hostnames whose last label is all digits or starts with `0x`; internationalized hosts must be submitted as punycode | Deadline; the gaps are characterized in tests and documented, and the fix touches five tests and four documents |
+| D-20 | Missing client address (Task 5) | Requests with no `request.client` share one `"unknown"` bucket | Accepted as proposed | Fails closed: missing peer information cannot be used to bypass the limit |
+| D-21 | Proxy headers (Task 5) | Uvicorn trusts forwarded headers from 127.0.0.1 by default | Run with `--no-proxy-headers`; the limiter reads only the direct peer address | A local client could otherwise spoof its address and dodge the limit (NFR-1); consequence recorded as L-6 |
+| D-22 | Accepted limiter gaps (Task 5) | Per-IP buckets keyed by the exact address; idle entries swept every 256 calls | Accept: single process and reset on restart (L-1), shared bucket behind a proxy (L-6), IPv6 clients can rotate addresses within a /64, memory bounded only by the sweeps (no hard cap) | Prototype scope; the fixes (shared store, prefix keying, size cap) are known and deferred |
 
 ## AI errors and gaps I caught
 
@@ -52,6 +55,9 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | E-14 | Task 3: tests errored with "database url_shortener_test does not exist"; Compose creates only the main database | Running the integration tests | Created the test database with `createdb`. Kept it as a documented manual setup step (in the README and Task 14 setup instructions) instead of automating it: it is a one-time command, and CI's PostgreSQL service creates the test database itself |
 | E-15 | Task 4: validator accepted parser-differential inputs (`http://jrb.sh\path`, `http://127%2E0%2E0%2E1/`, fullwidth `ｊｒｂ.ｓｈ`), so `127.0.0.1` and the shortener's own host passed the FR-5/FR-6 checks; the 46 tests did not cover them | Second-AI review of the tests and code, confirmed by running the inputs myself (all five ACCEPTED) | Follow-up prompt: reject backslashes, add a hostname allowlist, add tests for every input; all five now REJECTED |
 | E-16 | Task 4: after the follow-up, a Kelvin sign (`\u212a`) still passed the ASCII allowlist because Python lowercases it to `k` | Second-AI review; the new test failed before the fix (78 passed, 1 failed) | Added a `parsed.netloc.isascii()` check (my edit); the test now passes (79 passed) |
+| E-17 | Task 5: a test named "rejected requests do not extend the window" would pass even if they did (one recorded rejection is not enough to fill the bucket) | Second-AI review of the tests | Added a test with ten rejected attempts mid-window (my edit); renamed the old test to say what it checks |
+| E-18 | Task 5: first draft sampled the clock before taking the lock, so concurrent calls could append timestamps out of order | AI's own review during the task; I confirmed the clock read is now inside the lock in my review of `rate_limiter.py` | Clock read moved inside the lock |
+| E-19 | Task 5: every test builds its own app and registers the 429 handler itself, so nothing checks that `create_app()` registers it or that a real HTTP request gets the standard body | Second-AI review | Deferred to Task 6, whose API test sends 11 requests through `create_app()` and a TestClient |
 
 ## Planning
 ### Prompt: 
