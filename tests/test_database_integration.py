@@ -1,3 +1,4 @@
+import logging
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -426,3 +427,175 @@ def test_form_and_json_api_reuse_the_same_persisted_code(
     assert form_response.status_code == 200
     assert api_response.json()["code"] in form_response.text
     assert api_response.json()["short_url"] in form_response.text
+
+
+def test_end_to_end_api_create_redirect_and_form_reuse_logs_no_url(
+    database_url: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = _base_settings(database_url)
+    submitted_url = f"https://example.test/task9/{uuid4().hex}?query=value#anchor"
+    with caplog.at_level(logging.DEBUG), TestClient(create_app(settings)) as client:
+        created = client.post("/api/links", json={"url": submitted_url})
+        short_url = created.json()["short_url"]
+        redirected = client.get(f"/{created.json()['code']}", follow_redirects=False)
+        form_result = client.post("/", data={"url": submitted_url})
+
+    assert created.status_code == 200
+    assert redirected.status_code == 302
+    assert redirected.headers["location"] == submitted_url
+    assert form_result.status_code == 200
+    assert short_url in form_result.text
+    assert f'href="{short_url}"' in form_result.text
+    assert submitted_url not in caplog.text
+
+
+def test_expiry_set_through_api_redirects_before_expiration(
+    database_url: str,
+) -> None:
+    settings = _base_settings(database_url)
+    submitted_url = f"https://example.test/task9-expiry/{uuid4().hex}"
+    first_expiry = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+    replacement_expiry = (datetime.now(UTC) + timedelta(days=2)).isoformat()
+    permanent_url = f"https://example.test/task9-permanent/{uuid4().hex}"
+    with TestClient(create_app(settings)) as client:
+        created = client.post(
+            "/api/links",
+            json={"url": submitted_url, "expires_at": first_expiry},
+        )
+        replaced = client.post(
+            "/api/links",
+            json={"url": submitted_url, "expires_at": replacement_expiry},
+        )
+        made_permanent = client.post("/api/links", json={"url": submitted_url})
+        redirected = client.get(f"/{created.json()['code']}", follow_redirects=False)
+        permanent = client.post("/api/links", json={"url": permanent_url})
+        expiry_does_not_change_permanent = client.post(
+            "/api/links",
+            json={"url": permanent_url, "expires_at": replacement_expiry},
+        )
+
+    assert created.status_code == 200
+    assert replaced.status_code == 200
+    assert replaced.json()["code"] == created.json()["code"]
+    assert replaced.json()["expires_at"].startswith(replacement_expiry[:19])
+    assert made_permanent.json()["expires_at"] is None
+    assert redirected.status_code == 302
+    assert redirected.headers["location"] == submitted_url
+    assert permanent.status_code == 200
+    assert expiry_does_not_change_permanent.status_code == 200
+    assert expiry_does_not_change_permanent.json()["code"] == permanent.json()["code"]
+    assert expiry_does_not_change_permanent.json()["expires_at"] is None
+
+
+def test_http_rate_limit_ignores_forwarded_headers_and_not_redirects(
+    database_url: str,
+) -> None:
+    settings = _base_settings(database_url)
+    submitted_url = f"https://example.test/task9-limiter/{uuid4().hex}"
+    forwarded_headers = [
+        {"X-Forwarded-For": f"198.51.100.{index + 1}"} for index in range(11)
+    ]
+    with TestClient(create_app(settings)) as client:
+        created = client.post(
+            "/api/links", json={"url": submitted_url}, headers=forwarded_headers[0]
+        )
+        allowed = [
+            client.post(
+                "/api/links",
+                json={"url": submitted_url},
+                headers=forwarded_headers[index],
+            )
+            for index in range(1, 10)
+        ]
+        limited = client.post(
+            "/api/links",
+            json={"url": submitted_url},
+            headers=forwarded_headers[10],
+        )
+        redirected = client.get(f"/{created.json()['code']}", follow_redirects=False)
+
+    assert created.status_code == 200
+    assert all(response.status_code == 200 for response in allowed)
+    assert limited.status_code == 429
+    assert limited.headers["content-type"].startswith("application/json")
+    assert redirected.status_code == 302
+    assert redirected.headers["location"] == submitted_url
+
+
+def test_exact_url_identity_through_create_api(database_url: str) -> None:
+    settings = _base_settings(database_url)
+    submitted_url = f"https://example.test/Case/{uuid4().hex}"
+    with TestClient(create_app(settings)) as client:
+        first = client.post("/api/links", json={"url": submitted_url})
+        repeated = client.post("/api/links", json={"url": submitted_url})
+        different_case = client.post(
+            "/api/links", json={"url": submitted_url.replace("Case", "case")}
+        )
+        trailing_slash = client.post("/api/links", json={"url": f"{submitted_url}/"})
+
+    assert first.status_code == 200
+    assert repeated.json()["code"] == first.json()["code"]
+    assert different_case.status_code == 200
+    assert different_case.json()["code"] != first.json()["code"]
+    assert trailing_slash.status_code == 200
+    assert trailing_slash.json()["code"] != first.json()["code"]
+
+
+@pytest.mark.parametrize(
+    ("submitted_url", "expected_code"),
+    [
+        ("ftp://example.test/path", "invalid_url"),
+        ("https://user:pass@example.test/path", "credentials_not_allowed"),
+        ("https://api.jrb.sh/path", "self_reference"),
+        ("http://127.0.0.1/path", "private_host"),
+    ],
+)
+def test_create_api_url_policy_rejections_through_real_app(
+    database_url: str,
+    submitted_url: str,
+    expected_code: str,
+) -> None:
+    settings = _base_settings(database_url)
+    with TestClient(create_app(settings)) as client:
+        response = client.post("/api/links", json={"url": submitted_url})
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == expected_code
+
+
+def test_missing_and_malformed_redirects_through_real_app(
+    database_url: str,
+) -> None:
+    settings = _base_settings(database_url)
+    with psycopg.connect(database_url) as connection:
+        missing_code = _code()
+        while connection.execute(
+            "SELECT 1 FROM links WHERE code = %s", (missing_code,)
+        ).fetchone():
+            missing_code = _code()
+
+    with TestClient(create_app(settings)) as client:
+        missing = client.get(f"/{missing_code}", follow_redirects=False)
+        malformed = client.get("/bad-code!", follow_redirects=False)
+
+    assert missing.status_code == 404
+    assert malformed.status_code == 404
+    assert missing.json()["error"]["code"] == "not_found"
+    assert malformed.json()["error"]["code"] == "not_found"
+
+
+def test_form_escapes_url_through_real_postgres(
+    database_url: str,
+) -> None:
+    settings = _base_settings(database_url)
+    submitted_url = (
+        f"https://example.test/task9-escape/{uuid4().hex}/<script>alert(1)</script>"
+    )
+    with TestClient(create_app(settings)) as client:
+        response = client.post("/", data={"url": submitted_url})
+
+    assert response.status_code == 200
+    assert "<script>" not in response.text
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in response.text
+    assert "https://jrb.sh/" in response.text

@@ -85,12 +85,14 @@ redirect wait. The in-process limiter is single-process and resets on restart
 so when deployed behind a proxy, requests share the proxy's rate-limit bucket
 (L-6). 
 
-For PostgreSQL integration tests, point at the separate
-disposable database created above:
+For the full non-performance suite, point at the separate disposable test
+database created above and require the database fixture to fail rather than
+skip if it cannot connect:
 
 ```powershell
 $env:TEST_DATABASE_URL = "postgresql://url_shortener:replace-with-a-local-password@localhost:5432/url_shortener_test"
-python -m pytest -m integration
+$env:REQUIRE_DB = "1"
+python -m pytest -m "not performance"
 ```
 
 CI starts a PostgreSQL service container and sets REQUIRE_DB=1, so a missing or unreachable test database fails the run. Local runs without TEST_DATABASE_URL skip the integration tests.

@@ -2705,3 +2705,174 @@ Made changes.
 
 ##### Note:
 Browser check on 2026-09-30: created a link through the form, followed it (redirected), repeated the same URL and got the same code, invalid URLs showed a fixed error, and a script payload produced no alert and was escaped in the page source.
+
+## Task 9:
+### Prompt:
+This is a NEW task: Task 9. Tasks 1 through 8 are already committed. Do not
+summarize earlier tasks. Before writing any code, reply with the list of files
+you will create or change, then proceed.
+
+Task 9 from docs/tasks.md: cross-cutting integration and end-to-end tests.
+Read docs/tasks.md (Task 9), docs/requirements.md, and every file in tests/.
+Do not modify anything in docs/ or any file under url_shortener/. If a test
+reveals a bug, stop and tell me instead of fixing it. Do not commit or push.
+
+Step 1: produce a coverage matrix as a table: each of FR-1 to FR-12, NFR-1,
+NFR-2, NFR-7, A-1 to A-3 and L-3 to L-6, mapped to the existing test names
+that cover it, with a column marking any requirement that has NO test through
+the real HTTP path against PostgreSQL. Show me the matrix before writing tests.
+
+Step 2: add only the missing end-to-end tests (real PostgreSQL via the
+existing TEST_DATABASE_URL fixture, honoring REQUIRE_DB, create_app() and a
+TestClient), for example: create then redirect then the same link shown on the
+form; expiry set through the API then 302 before expiry; the 11th create from
+one client gets 429 while redirects from the same client are not limited;
+a forwarded header does not split the rate-limit bucket through the HTTP path;
+no test may log or print a full URL.
+
+Constraints: all four quality gates pass (python scripts/check.py) plus
+pytest; one documented command runs the non-performance suite against an
+isolated test database (add it to the README test section). The suite has
+185 tests; report the new count. List every file created or changed.
+
+#### Response:
+Files I expect to change: `test_database_integration.py` for missing real-PostgreSQL HTTP-path coverage, and `README.md` for the isolated non-performance test command. I’ll first read Task 9, requirements, and every test file, then show the requested coverage matrix before adding any tests.
+
+Ran terminal command: git status --short
+
+Read , lines 155 to 215
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+All test files are read; existing PostgreSQL-backed HTTP coverage includes API create/reuse, create→redirect, expired-row retention, revival, and form/API code reuse, but not the combined flow, API-set expiry redirect, or HTTP-path rate-limit/forwarded-header cases. One requirements read used a mistyped workspace path and failed, so I’m correcting it and checking the Task 9 header before I present the matrix.
+
+Read , lines 132 to 175
+
+Read 
+
+Read , lines 295 to 429
+
+Read 
+
+Read , lines 190 to 294
+
+The requirements and every test file are now reviewed. Here is the existing-coverage matrix; **Yes** means a real HTTP request runs with `create_app()` and the PostgreSQL fixture, **Partial** means only some branches/claims are exercised that way, and **No** means current evidence is unit-level or HTTP with a mocked DB.
+
+| Requirement | Existing tests | Real HTTP + PostgreSQL |
+|---|---|---|
+| FR-1 | `test_create_uses_exact_url_digest_and_one_parameterized_statement`, `test_generated_code_is_seven_base62_characters`, `test_exact_url_reuses_code_but_case_and_slash_remain_distinct`, `test_code_primary_key_collision_retries_with_new_candidate`, `test_concurrent_same_url_creates_arbitrate_to_one_row`, `test_create_api_persists_and_reuses_link`, `test_form_and_json_api_reuse_the_same_persisted_code` | Partial: API repeat is covered; case variants/collision/concurrency are persistence-only |
+| FR-2 | `test_active_links_redirect_with_valid_location`, `test_create_then_redirect_uses_stored_url`, `test_repeat_create_revives_expired_redirect` | Yes |
+| FR-3 | `test_rejects_invalid_absolute_urls`, `test_rejects_raw_whitespace_and_control_characters`, `test_rejects_overlength_url_before_parsing`, `test_accepts_url_at_maximum_length`, `test_invalid_url_returns_validator_error_code` | No |
+| FR-4 | `test_rejects_embedded_credentials` | No |
+| FR-5 | `test_rejects_self_reference`, `test_self_reference_uses_supplied_hostname_root`, `test_configured_public_hostname_is_used_for_self_reference` | No |
+| FR-6 | `test_rejects_private_loopback_and_local_hosts`, `test_rejects_additional_nonpublic_literal_addresses`, `test_legacy_alternate_ipv4_forms_remain_accepted` | No |
+| FR-7 | `test_accepts_exactly_365_days`, `test_rejects_more_than_365_days`, `test_rejects_invalid_expiry_values`, `test_repeat_expiry_rules_are_applied_atomically`, `test_expiry_boundary_uses_one_request_timestamp` | No: expiry rules are unit/direct-persistence or mocked HTTP |
+| FR-8 | `test_active_links_redirect_with_valid_location`, `test_create_then_redirect_uses_stored_url` | Yes |
+| FR-9 | `test_malformed_codes_return_404_without_database_access`, `test_missing_code_returns_standard_404`, `test_expiry_boundary_uses_one_request_timestamp`, `test_expired_redirect_is_404_and_row_remains_stored` | Partial: expired is covered; missing/malformed are mocked-DB |
+| FR-10 | `test_get_root_renders_form_with_security_headers`, `test_success_and_error_pages_escape_submitted_markup`, `test_form_and_json_api_reuse_the_same_persisted_code` | Partial: real form success is covered; escaping is mocked-DB |
+| FR-11 | `test_new_and_reused_create_return_200_with_public_base_url`, `test_create_api_persists_and_reuses_link`, `test_form_and_json_api_reuse_the_same_persisted_code` | Yes |
+| FR-12 | `test_new_and_reused_create_return_200_with_public_base_url`, `test_create_api_persists_and_reuses_link` | Yes |
+| NFR-1 | `test_admits_ten_requests_and_returns_standard_429_body`, `test_invalid_request_consumes_rate_limit_slot`, `test_eleventh_request_returns_standard_429_through_create_app` | No |
+| NFR-2 | `test_create_uses_exact_url_digest_and_one_parameterized_statement`, `test_failing_create_does_not_log_submitted_url`, `test_create_api_persists_and_reuses_link` | Partial: real API persistence exists; URL-log redaction is mocked-DB |
+| NFR-7 | `test_create_uses_exact_url_digest_and_one_parameterized_statement`, `test_exact_url_reuses_code_but_case_and_slash_remain_distinct`, `test_create_api_persists_and_reuses_link` | Partial: same-URL reuse is real; exact-string variants are persistence-only |
+| A-1 | `test_exact_url_reuses_code_but_case_and_slash_remain_distinct`, `test_create_api_persists_and_reuses_link` | Partial: same exact repeat is real; case/trailing-slash semantics are not |
+| A-2 | `test_repeat_expiry_rules_are_applied_atomically` | No |
+| A-3 | `test_expired_rows_are_retained_and_repeat_create_revives_same_code`, `test_repeat_create_revives_expired_redirect` | Yes |
+| L-3 | `test_expired_redirect_is_404_and_row_remains_stored` | Yes |
+| L-4 | `test_repeat_expiry_rules_are_applied_atomically`, `test_repeat_create_revives_expired_redirect` | Yes |
+| L-5 | `test_legacy_alternate_ipv4_forms_remain_accepted` | No |
+| L-6 | `test_forwarded_headers_do_not_change_the_rate_limit_key` | No |
+
+The missing end-to-end coverage is the combined API-create → redirect → form-reuse flow with URL-log capture, an expiry supplied through the API and exercised through redirect, and HTTP-path limiter behavior including forwarded headers and redirects sharing the client. I’ll add those integration cases and document one isolated-DB, non-performance command.
+
+Generating patch (100 lines) in , 
+
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_database_integration.py -k "end_to_end_api_create or expiry_set_through_api or http_rate_limit_ignores" -q
+
+The matrix is shown, and I’ve added only three missing integration scenarios plus the README command. The targeted tests collect correctly but skip because `TEST_DATABASE_URL` isn’t set in this shell; I’m running the documented command and quality gates next to verify the full count and catch any lint/type issues.
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest -m "not performance" -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+
+Ran terminal command: git diff --check
+
+Checked , no problems found
+
+The documented non-performance command runs and the quality gates pass; totals are **168 passed, 20 skipped (188 tests)**. The matrix still shows gaps in real-app validation, form escaping, exact-string API identity, and missing-code handling, so I’m adding only those PostgreSQL-backed HTTP cases and strengthening the expiry integration case to exercise repeat-update/no-expiry behavior through the API.
+
+Before extending the integration file, I’m rereading its current tail to respect any intervening edits and confirm the exact shape of the three new tests. Then I’ll add the remaining database-backed cases adjacent to them.
+
+Read , lines 350 to 504
+
+Generating patch (132 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_database_integration.py -k "expiry_set_through_api or exact_url_identity_through_create_api or url_policy_rejections_through_real_app or missing_and_malformed_redirects_through_real_app or form_escapes_url_through_real_postgres" -q
+
+The additional end-to-end cases collect successfully, but their selected PostgreSQL tests skip because the fixture has no `TEST_DATABASE_URL` configured. They now cover the matrix gaps for real-app URL policy, exact URL identity, missing-code lookup, and form escaping, alongside the expiry/rate-limit workflows; I’m running the final full suite and gates next.
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest -m "not performance" -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+
+Ran terminal command: git diff --check
+
+Checked , no problems found
+
+The final run is **168 passed, 27 skipped (195 total)**. Ruff lint, mypy, Bandit, and pip-audit pass; Ruff format found three wrap-only differences in the integration tests. I’m formatting that file and rerunning the gate check.
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m ruff format tests/test_database_integration.py
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest -m "not performance" -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+
+Ran terminal command: git status --short
+
+Ran terminal command: git diff --check
+
+Added the missing PostgreSQL-backed HTTP scenarios: combined API create → redirect → form reuse with URL-log capture; API expiry updates and permanence rules; shared-client rate limiting despite changing forwarded headers, with redirects still allowed; plus real-app coverage for URL policy, exact URL identity, missing codes, and form escaping.
+
+Changed: `test_database_integration.py`, `README.md`. The pre-existing change to `AI_usage_log.md` was left untouched.
+
+**Verification:** `python scripts/check.py` passed all quality gates. The documented non-performance suite reports **168 passed, 27 skipped: 195 tests total**. The PostgreSQL integration cases skipped because `TEST_DATABASE_URL` was not configured. `git diff --check` is clean.
+
+Made changes.
