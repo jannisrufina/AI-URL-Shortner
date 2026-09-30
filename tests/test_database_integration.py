@@ -13,6 +13,7 @@ from alembic.config import Config
 from fastapi.testclient import TestClient
 
 from alembic import command
+from scripts.seed_links import code_for_index, seed_links
 from url_shortener.app import create_app
 from url_shortener.database import (
     Database,
@@ -427,6 +428,65 @@ def test_form_and_json_api_reuse_the_same_persisted_code(
     assert form_response.status_code == 200
     assert api_response.json()["code"] in form_response.text
     assert api_response.json()["short_url"] in form_response.text
+
+
+def test_seed_links_accepts_real_schema_and_rolls_back(database_url: str) -> None:
+    class RollbackSeed(Exception):
+        pass
+
+    codes = [code_for_index(index) for index in range(1000)]
+    with psycopg.connect(database_url) as connection:
+        before = connection.execute(
+            "SELECT count(*) FROM links WHERE code = ANY(%s)", (codes,)
+        ).fetchone()
+
+        with pytest.raises(RollbackSeed), connection.transaction():
+            inserted = seed_links(connection, count=1000, seed=314159, batch_size=173)
+            data = connection.execute(
+                """
+                    SELECT count(*),
+                           count(DISTINCT code),
+                           count(DISTINCT url_digest),
+                           count(*) FILTER (WHERE code !~ '^[A-Za-z0-9]{7}$'),
+                           count(*) FILTER (WHERE octet_length(url_digest) <> 32)
+                    FROM links
+                    WHERE code = ANY(%s)
+                    """,
+                (codes,),
+            ).fetchone()
+            constraints = {
+                row[0]
+                for row in connection.execute(
+                    """
+                        SELECT conname
+                        FROM pg_constraint
+                        WHERE conrelid = 'public.links'::regclass
+                        """
+                ).fetchall()
+            }
+            indexes = {
+                row[0]
+                for row in connection.execute(
+                    """
+                        SELECT indexname
+                        FROM pg_indexes
+                        WHERE schemaname = 'public' AND tablename = 'links'
+                        """
+                ).fetchall()
+            }
+
+            assert inserted == 1000
+            assert data == (1000, 1000, 1000, 0, 0)
+            assert {"links_code_format", "links_url_digest_length"} <= constraints
+            assert {"links_pkey", "links_url_digest_uq"} <= indexes
+            raise RollbackSeed
+
+        remaining = connection.execute(
+            "SELECT count(*) FROM links WHERE code = ANY(%s)", (codes,)
+        ).fetchone()
+
+    assert before == (0,)
+    assert remaining == (0,)
 
 
 def test_end_to_end_api_create_redirect_and_form_reuse_logs_no_url(

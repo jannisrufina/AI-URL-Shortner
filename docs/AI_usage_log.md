@@ -2882,3 +2882,81 @@ Changed: `test_database_integration.py`, `README.md`. The pre-existing change to
 **Verification:** `python scripts/check.py` passed all quality gates. The documented non-performance suite reports **168 passed, 27 skipped: 195 tests total**. The PostgreSQL integration cases skipped because `TEST_DATABASE_URL` was not configured. `git diff --check` is clean.
 
 Made changes.
+
+## Task 10:
+### Prompt:
+This is a NEW task: Task 10. Tasks 1 through 9 are already committed. Do not
+summarize earlier tasks. Before writing any code, reply with the list of files
+you will create or change, then proceed.
+
+Task 10 from docs/tasks.md: Add a performance data seeder. Read docs/tasks.md
+(Task 10), docs/requirements.md (NFR-2, NFR-5, NFR-7, A-4, A-8), docs/design.md
+(Data Model), alembic/versions (the schema), and url_shortener/database.py and
+settings.py. Do not modify anything in docs/, anything under url_shortener/,
+or alembic/. Do not commit or push. Do NOT run the seeder against any
+database yourself; unit tests and a rolled-back integration test only. I will
+run the smoke and large seeds.
+
+Intent: a deterministic bulk loader that fills a DEDICATED benchmark database
+with synthetic links so Task 11 can measure redirect latency at scale. It must
+not use the rate-limited create endpoint.
+
+Scope:
+- scripts/seed_links.py with a core function seed_links(connection, count,
+  seed, batch_size) (no safety guards inside, so tests can call it) and a CLI.
+- Bulk load with psycopg COPY in batches, one transaction per batch. Schema
+  comes from `alembic upgrade head`; the seeder never creates or alters
+  tables and keeps the real indexes in place.
+- Each row: code is exactly 7 Base62 characters, UNIQUE by construction
+  (for example base62 of (i * K) mod 62^7 with K odd and not a multiple of
+  31, so it is a bijection; explain the math in a comment); original_url is
+  a unique synthetic https://bench.example/... URL that never needs
+  normalization; url_digest is SHA-256 over the exact UTF-8 URL bytes;
+  created_at is a fixed UTC timestamp derived from the seed (deterministic);
+  expires_at is NULL for 95% of rows and a future timestamp for 5% (chosen
+  by a seeded random.Random, never the global random). The same seed and
+  count must always produce identical rows.
+- CLI: `--count` (default 10000, the smoke size), `--seed` (default 1),
+  `--batch-size` (default 50000), `--database-url` or the BENCH_DATABASE_URL
+  environment variable (never DATABASE_URL, to avoid hitting the main
+  database by accident).
+- Safety guards in the CLI only: (1) refuse to run unless the target database
+  NAME ends in "_bench"; (2) refuse if the links table is not empty, unless
+  `--reset` is given, and `--reset` (TRUNCATE links) additionally requires
+  `--confirm-database NAME` matching the database name exactly; (3) refuse a
+  count above 2,000,000 unless `--allow-large` is given; (4) never print or
+  log URLs, the connection string, or the password (print only the database
+  name, counts, timings).
+- After loading: run ANALYZE links, then report rows inserted, elapsed time,
+  rows per second, and from pg_total_relation_size / pg_relation_size /
+  pg_indexes_size the table, index, and total sizes, bytes per row, and the
+  linear extrapolation to 10,000,000 rows compared with the 5 GB estimate in
+  A-8 (report index and overhead separately, per the task).
+- `--sample-codes-file PATH` (optional): write a deterministic sample of N
+  codes (default 10000, one per line; codes only, no URLs) for Task 11's
+  redirect load test to read.
+- README: add a short "Seeding benchmark data" section with the exact
+  PowerShell commands: create the `url_shortener_bench` database with
+  createdb, run alembic with DATABASE_URL pointed at it, run the smoke seed,
+  then the optional large seed; state that the 10M run is optional and needs
+  roughly several GB of disk and time, and recommend 1M.
+
+Tests (tests/test_seed_links.py; all must pass):
+- Unit: over 100,000 indexes every code has length 7 and only Base62
+  characters and all codes are unique; every digest is 32 bytes and unique and
+  equals SHA-256 of the row's URL; same seed gives identical output and a
+  different seed differs in the random fields; about 5% of rows have an
+  expiry and all expiries are in the future relative to the fixed timestamp.
+- Guards: the database-name check, non-empty-table refusal, `--reset`
+  requiring the matching `--confirm-database`, the `--allow-large` threshold,
+  and that nothing printed or logged contains a URL (capture stdout/stderr and
+  logs).
+- Integration (existing TEST_DATABASE_URL fixture, honoring REQUIRE_DB): call
+  seed_links on a connection INSIDE a transaction that is always rolled back,
+  with 1,000 rows, then assert the row count and that the real constraints
+  (code format CHECK, digest length CHECK, both unique indexes) accepted the
+  data. Nothing may remain in the test database afterward.
+
+Constraints: all four quality gates pass (python scripts/check.py) plus pytest;
+no global suppressions; no new dependencies. The suite has 195 tests; report
+the new count. List every file created or changed and any decision to review.

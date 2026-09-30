@@ -97,3 +97,25 @@ python -m pytest
 
 CI starts a PostgreSQL service container and sets REQUIRE_DB=1, so a missing or unreachable test database fails the run. Local runs without TEST_DATABASE_URL skip the integration tests.
 
+## Seeding benchmark data
+
+Use a dedicated benchmark database. The 10,000-row smoke seed is the default;
+the 1,000,000-row run is the recommended scale-up. A 10,000,000-row run is
+optional and requires several GB of free disk space plus substantial load time.
+The seeder refuses non-`_bench` database names and non-empty tables by default.
+
+```powershell
+docker compose exec -T postgres createdb -U url_shortener url_shortener_bench
+$env:DATABASE_URL = "postgresql://url_shortener:replace-with-a-local-password@localhost:5432/url_shortener_bench"
+$env:BENCH_DATABASE_URL = $env:DATABASE_URL
+python -m alembic upgrade head
+python -m scripts.seed_links --count 10000 --seed 1
+python -m scripts.seed_links --count 1000000 --seed 1 --sample-codes-file sample-codes.txt
+# Optional 10M scale seed; explicitly opt in and confirm destructive reset only if needed.
+python -m scripts.seed_links --count 10000000 --seed 1 --allow-large --reset --confirm-database url_shortener_bench --sample-codes-file sample-codes-10m.txt
+```
+
+`BENCH_DATABASE_URL` is used by the seeder; it never falls back to
+`DATABASE_URL`. Resetting requires `--reset --confirm-database
+url_shortener_bench`. The sample file contains short codes only.
+
