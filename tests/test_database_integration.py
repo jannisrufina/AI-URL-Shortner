@@ -1,18 +1,23 @@
 import os
-from datetime import UTC, datetime
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
 
 import psycopg
 import pytest
 from alembic.config import Config
+from fastapi.testclient import TestClient
 
 from alembic import command
+from url_shortener.app import create_app
 from url_shortener.database import (
     Database,
     DatabasePoolTimeoutError,
     DatabaseStatementTimeoutError,
 )
+from url_shortener.links import Link, create_or_reuse_link
 from url_shortener.settings import Settings
 
 pytestmark = pytest.mark.integration
@@ -175,3 +180,159 @@ def test_statement_timeout_has_database_error_type(database_url: str) -> None:
             connection.execute("SELECT pg_sleep(0.2)")
     finally:
         database.close()
+
+
+def test_exact_url_reuses_code_but_case_and_slash_remain_distinct(
+    database_url: str,
+) -> None:
+    database = Database(_base_settings(database_url))
+    database.open()
+    base_url = f"https://example.test/exact/{uuid4().hex}"
+    created_at = datetime.now(UTC)
+    try:
+        first = create_or_reuse_link(database, base_url, None, created_at)
+        repeated = create_or_reuse_link(database, base_url, None, created_at)
+        different_case = create_or_reuse_link(
+            database, base_url.upper(), None, created_at
+        )
+        trailing_slash = create_or_reuse_link(
+            database, f"{base_url}/", None, created_at
+        )
+    finally:
+        database.close()
+
+    assert repeated.code == first.code
+    assert different_case.code != first.code
+    assert trailing_slash.code != first.code
+
+
+def test_concurrent_same_url_creates_arbitrate_to_one_row(
+    database_url: str,
+) -> None:
+    database = Database(_base_settings(database_url, DB_POOL_MAX_SIZE="10"))
+    database.open()
+    submitted_url = f"https://example.test/concurrent/{uuid4().hex}"
+    created_at = datetime.now(UTC)
+
+    def create(_: int) -> Link:
+        return create_or_reuse_link(database, submitted_url, None, created_at)
+
+    try:
+        with ThreadPoolExecutor(max_workers=20) as executor:
+            results = list(executor.map(create, range(20)))
+    finally:
+        database.close()
+
+    codes = {result.code for result in results}
+    digest = sha256(submitted_url.encode("utf-8")).digest()
+    with psycopg.connect(database_url) as connection:
+        count = connection.execute(
+            "SELECT count(*) FROM links WHERE url_digest = %s", (digest,)
+        ).fetchone()
+
+    assert len(codes) == 1
+    assert count == (1,)
+
+
+def test_code_primary_key_collision_retries_with_new_candidate(
+    database_url: str,
+) -> None:
+    occupied_code = "Collide"
+    with psycopg.connect(database_url) as connection:
+        _insert(connection, occupied_code, _digest())
+
+    database = Database(_base_settings(database_url))
+    database.open()
+    candidates = iter((occupied_code, "Retry22"))
+    generated: list[str] = []
+
+    def code_generator() -> str:
+        code = next(candidates)
+        generated.append(code)
+        return code
+
+    submitted_url = f"https://example.test/collision/{uuid4().hex}"
+    try:
+        result = create_or_reuse_link(
+            database,
+            submitted_url,
+            None,
+            datetime.now(UTC),
+            code_generator,
+        )
+    finally:
+        database.close()
+
+    assert result.code == "Retry22"
+    assert generated == [occupied_code, "Retry22"]
+
+
+def test_expired_rows_are_retained_and_repeat_create_revives_same_code(
+    database_url: str,
+) -> None:
+    database = Database(_base_settings(database_url))
+    database.open()
+    submitted_url = f"https://example.test/revive/{uuid4().hex}"
+    created_at = datetime.now(UTC)
+    expired_at = created_at - timedelta(seconds=1)
+    revived_expiry = created_at + timedelta(days=30)
+    try:
+        expired = create_or_reuse_link(database, submitted_url, expired_at, created_at)
+        retained = create_or_reuse_link(database, submitted_url, expired_at, created_at)
+        revived = create_or_reuse_link(
+            database, submitted_url, revived_expiry, created_at
+        )
+    finally:
+        database.close()
+
+    assert retained.code == expired.code
+    assert revived.code == expired.code
+    assert revived.expires_at == revived_expiry
+
+
+@pytest.mark.parametrize(
+    ("existing_expiry", "new_expiry", "expected_expiry"),
+    [
+        (None, datetime(2026, 10, 1, tzinfo=UTC), None),
+        (datetime(2026, 10, 1, tzinfo=UTC), None, None),
+        (
+            datetime(2026, 10, 1, tzinfo=UTC),
+            datetime(2026, 11, 1, tzinfo=UTC),
+            datetime(2026, 11, 1, tzinfo=UTC),
+        ),
+    ],
+)
+def test_repeat_expiry_rules_are_applied_atomically(
+    database_url: str,
+    existing_expiry: datetime | None,
+    new_expiry: datetime | None,
+    expected_expiry: datetime | None,
+) -> None:
+    database = Database(_base_settings(database_url))
+    database.open()
+    submitted_url = f"https://example.test/expiry/{uuid4().hex}"
+    created_at = datetime.now(UTC)
+    try:
+        first = create_or_reuse_link(
+            database, submitted_url, existing_expiry, created_at
+        )
+        repeated = create_or_reuse_link(database, submitted_url, new_expiry, created_at)
+    finally:
+        database.close()
+
+    assert repeated.code == first.code
+    assert repeated.expires_at == expected_expiry
+
+
+def test_create_api_persists_and_reuses_link(database_url: str) -> None:
+    settings = _base_settings(database_url)
+    submitted_url = f"https://example.test/api/{uuid4().hex}"
+    with TestClient(create_app(settings)) as client:
+        first = client.post("/api/links", json={"url": submitted_url})
+        repeated = client.post("/api/links", json={"url": submitted_url})
+
+    assert first.status_code == 200
+    assert repeated.status_code == 200
+    assert first.json()["code"] == repeated.json()["code"]
+    assert first.json()["short_url"] == f"https://jrb.sh/{first.json()['code']}"
+    assert first.json()["expires_at"] is None

@@ -1789,3 +1789,376 @@ All quality gates pass, and all **105 tests pass**, including PostgreSQL integra
 **Decision to review:** when `request.client` is `None`, requests share the `"unknown"` limiter bucket. This fails closed rather than allowing missing peer information to bypass the limit. `AI_usage_log.md` is modified in the worktree but was not touched for this task.
 
 Made changes.
+
+## Task 6:
+### Prompt:
+Task 6 from docs/tasks.md: Implement create persistence and the JSON API.
+Read docs/tasks.md (Task 6), docs/design.md (Data Model, Expiry on repeated
+creates, API Contract, Validation Rules, Create Control Flow, Failure
+Behavior), and docs/requirements.md (FR-1, FR-3 to FR-7, FR-11, FR-12, NFR-2,
+NFR-4, NFR-7, A-1 to A-3, L-4) first. Also read url_shortener/app.py,
+database.py, settings.py, validation.py, and rate_limiter.py. Do not modify
+anything in docs/. Do not commit or push.
+
+Intent: POST /api/links creates or reuses a short link. Only this endpoint;
+no redirect route (Task 7) and no form (Task 8).
+
+Scope:
+- A persistence module (for example url_shortener/links.py) with a function
+  that, given the validated URL, optional expiry, and one UTC creation
+  timestamp, runs ONE parameterized statement: INSERT ... ON CONFLICT
+  (url_digest) DO UPDATE ... RETURNING code, original_url, expires_at, using
+  the expiry CASE from design.md (if the existing or the new expiry is NULL
+  the result is NULL, otherwise the new expiry). url_digest is SHA-256 over the
+  exact UTF-8 bytes of the submitted URL, no normalization. No advisory locks,
+  no preliminary lookup.
+- Codes: 7 random Base62 characters from `secrets`. Retry with a new code ONLY
+  when the violated constraint is the code primary key (check the actual
+  constraint name in the Task 3 migration, do not guess), bounded (for example
+  5 attempts), then raise an error that maps to 503. Pool, connection, and
+  statement-timeout errors from Task 3 must never be treated as collisions.
+- The database layer is synchronous psycopg. Do not call it directly from an
+  `async def` endpoint (that would block the event loop): use a plain `def`
+  endpoint (FastAPI runs it in a threadpool) or run_in_threadpool, and say
+  which you chose and why.
+- Endpoint POST /api/links with body {"url": str, "expires_at": optional
+  string}. Parse expires_at yourself as an RFC 3339 timestamp with an explicit
+  timezone. Do NOT let Pydantic coerce it: numbers (Unix timestamps), naive
+  timestamps, and non-strings must be rejected with invalid_expiry. "url" must
+  be a string. Order: the rate-limit dependency runs first (S-6: an attempt
+  consumes a slot even if it later fails), then validate_url (self-reference
+  root is the hostname parsed ONCE at startup from the configured
+  PUBLIC_BASE_URL, stored on app.state in the lifespan, not hardcoded), then
+  expiry validation, then persistence.
+- Expiry validation (FR-7): timezone-aware, strictly later than the request's
+  creation timestamp, and at most 365 days after it, measured from this
+  request's timestamp even for repeated creates. Error code invalid_expiry.
+- Success: HTTP 200 for both new and reused links, body {"code", "short_url",
+  "expires_at"}, with short_url built from PUBLIC_BASE_URL and the code (FR-11).
+- Errors use the standard body {"error": {"code": ..., "message": ...}} with
+  fixed messages: 422 for validation failures (use the validator's stable
+  codes), 429 from the limiter, 503 for database pool/connection/statement
+  timeout and exhausted code retries. Register an override for FastAPI's
+  RequestValidationError in create_app so malformed JSON, a missing field, and
+  wrong types also return the standard body and NEVER echo the submitted input
+  (FastAPI's default 422 includes it). Keep the existing 429 handler; do not
+  add a broad Exception or HTTPException handler.
+- Logging: never log the URL or the request body. No new dependencies, except
+  add httpx to requirements-dev.in ONLY if it is not already present (for
+  TestClient), then recompile the locks.
+
+Tests (all must pass; every API test builds the app with create_app(), never a
+bare FastAPI(); PostgreSQL integration tests use the existing
+TEST_DATABASE_URL fixture and honor REQUIRE_DB):
+- Persistence (integration): the same exact URL returns the same code; URLs
+  differing only by case or trailing slash get different codes; concurrent
+  creates of one URL (at least 20 threads) produce exactly one row and one
+  code; a mocked code generator returning a colliding code first results in a
+  retry and success; expired rows are retained.
+- Expiry (integration + unit): the 365-day boundary (accepted at 365 days,
+  rejected after); past, exactly-now, naive, numeric, and non-string values
+  rejected; both repeat rules (no expiry wins; both set then the new one
+  replaces); a repeat create revives an expired link with the same code.
+- API: new and reused creates both return 200 with the documented body;
+  invalid URL returns 422 with the validator's code; a 422 body (including
+  malformed JSON, a missing field, and a non-string url) never contains the
+  submitted URL or input; the 11th request from one client returns 429 with
+  the standard body THROUGH create_app() and a TestClient; an invalid request
+  still consumes a rate-limit slot; a simulated pool or statement timeout
+  returns 503; short_url uses PUBLIC_BASE_URL.
+- Logging: a test that captures logs during a failing create and asserts the
+  URL does not appear.
+
+Constraints:
+- All four quality gates pass (python scripts/check.py) plus pytest; no global
+  suppressions.
+- Do not change validation.py, rate_limiter.py, or the Task 3 schema.
+
+When done, list every file created or changed, how to run the integration
+tests, and any decision I should review.
+
+#### Response:
+I’ll first read the requested task/design/requirements sections and the existing app, database, settings, validation, and limiter code. Then I’ll map the Task 3 constraint name and nearby test conventions so the persistence retry and API behavior are grounded before I edit.
+
+Read memory
+
+Ran terminal command: git status --short
+
+Read , lines 1 to 260
+
+Read 
+
+Read 
+
+Read skill `python-fact-grounded-coding`
+
+The requested docs make the decisive rules clear: exact URL bytes define identity, expiry is checked against one request timestamp, and conflict retries must be limited to the actual code PK constraint. The worktree also has a pre-existing edit in `AI_usage_log.md`; I’ll leave it untouched and now inspect the app/database setup, migration constraint, and test fixtures.
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Searched for regex `TEST_DATABASE_URL|REQUIRE_DB|TestClient|create_app\(|PoolTimeout|StatementTimeout|InvalidExpiry` (`**/tests/**`), 8 results
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read , lines 1 to 160
+
+The Task 3 migration confirms the code primary-key constraint is exactly `links_pkey`; `Database.connection()` already translates pool, connection, and statement-timeout failures into typed errors. One important routing detail: I’ll keep the endpoint free of a typed body parameter so the limiter dependency runs before JSON parsing, then parse/validate the body explicitly and send malformed shapes through the standardized `RequestValidationError` handler.
+
+Ran terminal command: python -m pytest -q
+Completed with input: python -m pytest -q
+
+No matches found. Your search pattern might be excluded completely by either the search.exclude settings or .*ignore files.
+If you believe that it should have results, you can check into the .*ignore files and the exclude setting (here are some excluded patterns for reference:[**/node_modules,**/bower_components,**/*.code-search]).
+Then if you want to include those files you can call the tool again by setting "includeIgnoredFiles" to true.
+
+Read 
+
+Read , lines 160 to 218
+
+Read 
+
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest -q
+
+Created 4 todos
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pip show httpx
+Completed with input: & .\.venv\Scripts\python.exe -m pip show httpx
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pip show pip-tools
+
+My local hypothesis is that a route with only `Request` plus an explicit limiter dependency avoids FastAPI’s eager body parsing; that lets even malformed JSON consume a slot before we parse it. The existing baseline passes (`101 passed, 5 skipped`), the schema confirms `links_pkey`, and `httpx` is absent, so I’m adding explicit RFC3339/expiry handling, atomic persistence, standardized handlers, and focused tests; I’ll use `run_in_threadpool` because the psycopg layer is synchronous.
+
+Apply Patch
+
+Generating patch (243 lines) in , , 
+
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+
+Ran `pylanceFileSyntaxErrors` 
+Completed with input: {
+  "fileUri": "file:///c:/Git/AI-URL-Shortner/url_shortener/app.py",
+  "workspaceRoot": "c:\\Git\\AI-URL-Shortner"
+}
+
+Ran `pylanceFileSyntaxErrors` 
+Completed with input: {
+  "fileUri": "file:///c:/Git/AI-URL-Shortner/url_shortener/expiry.py",
+  "workspaceRoot": "c:\\Git\\AI-URL-Shortner"
+}
+
+Ran `pylanceFileSyntaxErrors` 
+Completed with input: {
+  "fileUri": "file:///c:/Git/AI-URL-Shortner/url_shortener/links.py",
+  "workspaceRoot": "c:\\Git\\AI-URL-Shortner"
+}
+
+The production slice now parses successfully. The persistence function uses one parameterized upsert and retries only `UniqueViolation` whose diagnostic names `links_pkey`; the endpoint runs that synchronous function in Starlette’s thread pool, keeping the event loop free. Next I’m adding expiry, API, logging, collision, and concurrency coverage; TestClient needs `httpx`, so I’ll add it only to the dev input and regenerate the pinned locks.
+
+Apply Patch
+
+Generating patch (129 lines) in , , 
+
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_expiry.py tests/test_links.py -q
+
+Generating patch (220 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m piptools compile --constraint requirements.txt --output-file requirements-dev.txt requirements-dev.in
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+
+The expiry and persistence-unit slice is green (`16 passed`), and the dev lock now includes `httpx==0.28.1` with its required support packages; the project virtual environment has that lock installed. I’m moving on to database integration coverage using the existing `TEST_DATABASE_URL`/`REQUIRE_DB` pattern, including 20-thread arbitration, PK-collision retry, exact-string identity, and retained/revived expiry rows.
+
+Generating patch (167 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_database_integration.py -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_create_api.py tests/test_expiry.py tests/test_links.py -q
+
+The focused app and helper tests now pass (`28 passed`), including malformed JSON, missing/wrong fields, numeric expiry rejection, configured-host self-reference, slot consumption, sanitized `429`/`503`, and URL-free logging. Integration tests are correctly skipped when no `TEST_DATABASE_URL` is configured; I’m tightening their evidence now with a real PostgreSQL-backed API create/reuse case and cleaning a couple of test imports before running the full quality gates.
+
+Generating patch (43 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_create_api.py tests/test_database_integration.py -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+Completed with input: & .\.venv\Scripts\python.exe scripts/check.py
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest -q
+
+Read 
+
+The full suite is green (`129 passed, 13 skipped`), while the quality script found only local lint/format/type issues: handler signatures need Starlette’s declared `Exception` shape, and the fake DB test needs an explicit test-side cast. I’m fixing those without suppressions, then I’ll rerun the same quality gate before continuing.
+
+Generating patch (87 lines) in , , , 
+
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m ruff format url_shortener/app.py url_shortener/links.py tests/test_create_api.py tests/test_links.py tests/test_expiry.py tests/test_database_integration.py
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+Completed with input: & .\.venv\Scripts\python.exe scripts/check.py
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_create_api.py tests/test_expiry.py tests/test_links.py -q
+
+The typing fixes cleared Ruff lint, mypy, both Bandit scans, and pip-audit; the focused tests remain green. The one remaining gate failure is just that `expiry.py` was omitted from the formatting command, so I’m formatting that file and rerunning the complete gate script.
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m ruff format url_shortener/expiry.py
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+
+Generating patch (37 lines) in , 
+
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_create_api.py tests/test_links.py -q
+
+The last behavioral pass is green (`15 passed`), and I adjusted the generator default so tests can monkeypatch `generate_code` naturally while still allowing explicit injection. API coverage now also includes a missing-field payload with a secret unrelated value and all three typed DB failure cases; next I’m doing the final full suite, quality gates, and diagnostics.
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m ruff format url_shortener/links.py tests/test_create_api.py
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+
+Ran `pylanceLSP` 
+Completed with input: {
+  "method": "workspace/diagnostic",
+  "params": {},
+  "workspaceRoot": "c:\\Git\\AI-URL-Shortner"
+}
+
+Checked , , , , , , , no problems found
+
+Final verification is clean: the suite reports `130 passed, 13 skipped`, and all four quality-gate categories pass. The skipped cases are PostgreSQL integration tests because `TEST_DATABASE_URL` is not set; I’m doing the final worktree/diff audit now and will call that out with the exact command to run them.
+
+Starting: *Compile dependencies and run gates* (4/4)
+
+Ran terminal command: git status --short
+
+Ran terminal command: git diff --check
+
+Ran terminal command: git diff --stat
+
+Ran terminal command: Get-ChildItem Env:TEST_DATABASE_URL,Env:REQUIRE_DB -ErrorAction SilentlyContinue | Select-Object Name,Value
+
+Completed: *Compile dependencies and run gates* (4/4)
+
+Implemented Task 6. `POST /api/links` validates requests in the required order, uses a single parameterized upsert with exact-URL SHA-256 identity, and returns HTTP 200 for new and reused links. The synchronous psycopg call runs via `run_in_threadpool` so it does not block the async endpoint. Errors use the standard sanitized body; request-validation responses do not echo input.
+
+**Files**
+Modified: `requirements-dev.in`, `requirements-dev.txt`, `test_database_integration.py`, `app.py`.
+
+Created: `test_create_api.py`, `test_expiry.py`, `test_links.py`, `expiry.py`, `links.py`.
+
+No files in `docs` were changed. The existing edit to `AI_usage_log.md` was already present and left untouched.
+
+**Verification**
+`python scripts/check.py` passed all quality gates. `pytest` reported **130 passed, 13 skipped**. The skipped tests require PostgreSQL; `TEST_DATABASE_URL` is not configured here.
+
+Run the integration tests against a disposable PostgreSQL test database with:
+
+```powershell
+$env:TEST_DATABASE_URL = "postgresql://user:password@localhost:5432/url_shortener_test"
+$env:REQUIRE_DB = "1"
+.\.venv\Scripts\python.exe -m pytest -m integration
+```
+
+The test fixture applies Alembic migrations to that database. The implementation uses a five-attempt code-collision limit and maps exhausted retries to `503 service_unavailable`; those are the implementation choices to review.
+
+Made changes.

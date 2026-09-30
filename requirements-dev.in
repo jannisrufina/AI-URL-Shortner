@@ -6,3 +6,4 @@ pip-audit
 pip-tools==7.6.1
 pytest
 ruff
+httpx
