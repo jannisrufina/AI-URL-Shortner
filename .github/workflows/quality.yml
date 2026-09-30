@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
+      REQUIRE_DB: "1"
       TEST_DATABASE_URL: postgresql://url_shortener:local-test-password@localhost:5432/url_shortener_test
     services:
       postgres:

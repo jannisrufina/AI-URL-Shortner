@@ -22,6 +22,8 @@ pytestmark = pytest.mark.integration
 def database_url() -> str:
     value = os.environ.get("TEST_DATABASE_URL", "").strip()
     if not value:
+        if os.environ.get("REQUIRE_DB", "").strip().lower() in {"1", "true", "yes"}:
+            pytest.fail("REQUIRE_DB is set but TEST_DATABASE_URL is missing")
         pytest.skip("Set TEST_DATABASE_URL to run PostgreSQL integration tests")
 
     root = Path(__file__).resolve().parents[1]
