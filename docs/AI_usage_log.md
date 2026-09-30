@@ -913,3 +913,247 @@ Created `architecture.md` only. It includes the component boundaries, create and
 All quality gates passed, and pytest passed (1 test). No commit or push was made.
 
 Made changes.
+##### Note:
+Everything looks good, so going to proceed to Task 3.
+
+## Task 3
+### Prompt: 
+Task 3 from docs/tasks.md: Bootstrap app, schema, and bounded database access.
+Read docs/tasks.md (Task 3), docs/design.md (Data Model, Schema
+initialization, Failure Behavior), and docs/requirements.md first. Do not
+modify anything in docs/. Do not commit or push.
+
+Intent: a running FastAPI process connected to PostgreSQL through a bounded
+pool, with the `links` schema created by an Alembic migration. No product
+behavior yet.
+
+Scope:
+- FastAPI app skeleton (app factory or module-level app) that starts as a
+  single process. Do NOT add the create, redirect, or form endpoints, URL
+  validation, or the rate limiter; those are later tasks.
+- Settings read from environment variables: DATABASE_URL, PUBLIC_BASE_URL, and
+  the pool/timeout values (defaults: pool min 1, max 10; pool wait 250 ms;
+  connect timeout 2 s; statement timeout 1 s). Validate PUBLIC_BASE_URL parses
+  as an absolute URL. Commit only a .env.example with placeholders.
+- docker-compose.yml with PostgreSQL as the only service, with a healthcheck.
+- Alembic setup and the initial migration creating `links` exactly as in
+  design.md (code VARCHAR(7) PK with the format CHECK, url_digest BYTEA NOT NULL
+  with length-32 CHECK, original_url TEXT NOT NULL, expires_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL, unique index on url_digest). Migrations run
+  only via `alembic upgrade head`, never on app startup or per request.
+- Database access module: psycopg 3 with psycopg_pool, bounded pool, pool
+  acquisition wait, connect timeout, and statement timeout applied. Pool
+  exhaustion, connection timeout, and statement timeout must raise an error
+  type distinguishable from a unique-constraint violation.
+- Dependencies: add only what this task uses (psycopg[binary,pool], alembic, and
+  uvicorn to run the app). Update requirements.in / requirements-dev.in and
+  regenerate the compiled files with pip-compile. Do not add jinja2 or
+  python-multipart yet.
+
+Tests (each must pass; register an `integration` marker in pyproject.toml since
+--strict-markers is on):
+- Unit: settings parsing/validation and bounded-config limits.
+- Integration (PostgreSQL): migration applies and is repeatable; schema
+  constraints and both unique indexes exist and reject bad rows (bad code
+  format, wrong digest length, duplicate digest, duplicate code); pool
+  exhaustion and statement timeout return the distinguishable error.
+- Compose check: a documented command shows PostgreSQL healthy before running
+  migrations.
+
+CI: update .github/workflows/quality.yml to provide PostgreSQL as a service
+container for the integration tests, keeping the four gates and pytest.
+
+Constraints:
+- All four quality gates must pass; no global suppressions.
+- The 250 ms pool wait is an overload/failure bound, not an expected redirect
+  wait (see the latency note in Task 3). Note this in the code comments or
+  README so it is not misread.
+- No secrets committed; no full URLs logged.
+
+When done, list every file created or changed, how to run the integration
+tests locally, and any decision I should review.
+
+#### Response:
+I’ll first re-read Task 3 and the exact schema/timeout requirements, then inspect the existing scaffold and dependency pins. I’ll keep all edits outside `docs`, preserve the existing quality gates, and validate the PostgreSQL integration path with a local service if Docker is available.
+
+Task 3’s approved schema, pool defaults, and migration boundary are clear. I’ll inspect the current scaffold/dependency compiler setup and check Docker availability; the key implementation hypothesis is that psycopg’s pool acquisition/connect/query timeout exceptions must be wrapped separately from PostgreSQL integrity violations, which I’ll verify with focused PostgreSQL integration tests.
+
+Ran terminal command: docker --version; docker compose version; .\.venv\Scripts\python.exe -m pip show psycopg psycopg-pool alembic uvicorn pip-tools
+
+Docker isn’t installed or on PATH, and the current venv lacks Alembic, psycopg_pool, and Uvicorn. I’ll check for an already-running local PostgreSQL before treating integration execution as unavailable; meanwhile the implementation can still be completed with integration tests configured for Compose and CI’s service container.
+
+Ran terminal command: Get-Service -Name '*postgres*' -ErrorAction SilentlyContinue | Select-Object Name,Status; Get-Command psql.exe,postgres.exe -ErrorAction SilentlyContinue | Select-Object Name,Source; Test-NetConnection -ComputerName localhost -Port 5432 -InformationLevel Quiet
+
+No local PostgreSQL listener or server tools are available, so I can build the real integration tests and CI service, but local execution will depend on Docker installation. The implementation plan is now concrete: settings + pool/error mapping, Alembic migration, Compose/CI service, focused unit/integration tests, and setup instructions outside `docs`.
+
+I’m starting with the dependency inputs, adding only Alembic, Uvicorn, and psycopg’s binary/pool extras to the existing FastAPI runtime set. I’ll compile the lock files immediately and check psycopg_pool’s actual timeout exception API before building the wrapper.
+
+Ran terminal command: .\.venv\Scripts\python.exe -m piptools compile --output-file requirements.txt requirements.in; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m piptools compile --constraint requirements.txt --output-file requirements-dev.txt requirements-dev.in; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
+
+The dependency inputs compiled and installation is underway; I’m checking the compiler/install result and the actual pool exception names before editing the database module.
+
+Ran terminal command: .\.venv\Scripts\python.exe -c "import psycopg_pool; print([name for name in dir(psycopg_pool) if 'Timeout' in name or 'Error' in name]); print(psycopg_pool.ConnectionPool.__doc__[:1200])"
+Completed with input: .\.venv\Scripts\python.exe -c "import psycopg_pool; print([name for name in dir(psycopg_pool) if 'Timeout' in name or 'Error' in name]); print(psycopg_pool.ConnectionPool.__doc__[:1200])"
+
+The pool API is verified: psycopg_pool exposes `PoolTimeout`, while psycopg exposes `OperationalError` for connection failures and `QueryCanceled` for statement timeouts. I’ll wrap those as database-access errors distinct from `UniqueViolation`, set `statement_timeout` on each pooled connection, add a lifespan-only app with no routes, and wire isolated PostgreSQL integration tests through `TEST_DATABASE_URL`.
+
+I’m adding the core Python settings, database access, and FastAPI lifespan module; an Alembic environment and initial schema migration; the one-service Compose file and placeholder env file; and focused unit/integration tests. The integration fixture will use `TEST_DATABASE_URL`, so CI runs it against PostgreSQL and local runs can skip it explicitly when no test database is configured.
+
+The core modules and initial migration are in place, with explicit pool, connection, and statement error types; the integration tests cover repeatable migrations, both unique indexes, constraint failures, pool exhaustion, and statement cancellation. Next I’m wiring the integration marker, Compose/CI PostgreSQL services, and reproducible setup commands, then I’ll run Ruff/mypy before tests.
+
+Starting: *Add tests and CI PostgreSQL service* (3/4)
+
+I’m adding only the requested integration marker and CI/PostgreSQL wiring, plus root README instructions for a healthy-before-migration Compose check and the 250 ms overload-bound interpretation. No `docs` files are being touched.
+
+The Compose health-gated startup, explicit Alembic command, one-worker Uvicorn command, and CI PostgreSQL service are now wired. I’m running Ruff immediately to catch any new rule findings in the Python modules, migration template, or integration tests before proceeding to type checks and database execution.
+
+Ran terminal command: .\.venv\Scripts\python.exe -m ruff check .
+Completed with input: .\.venv\Scripts\python.exe -m ruff check .
+
+Ruff found only mechanical import ordering and nested-context style issues in the new files. I’m applying Ruff’s targeted safe fixes to those findings, then I’ll rerun the same lint command before adding more code.
+
+Ran terminal command: .\.venv\Scripts\python.exe -m ruff check --fix alembic tests url_shortener
+Completed with input: .\.venv\Scripts\python.exe -m ruff check --fix alembic tests url_shortener 
+
+Import sorting is corrected; Ruff’s remaining findings are six nested context-manager patterns in the database tests. I’m flattening those contexts without changing which exception each test expects, then I’ll rerun Ruff.
+
+Ran terminal command: .\.venv\Scripts\python.exe -m ruff check .
+Completed with input: .\.venv\Scripts\python.exe -m ruff check .
+
+The first manual reorder didn’t match Ruff’s import sorter’s preferred `alembic.config` ordering, and the statement-timeout context line exceeds the configured width. I’m applying those two exact adjustments and rerunning the same lint check.
+
+Ran terminal command: .\.venv\Scripts\python.exe -m ruff check .; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff format --check .
+Completed with input: .\.venv\Scripts\python.exe -m ruff check .; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff format --check .
+
+Ruff is applying an unexpected third-party import grouping in that test; the remaining issue is import order only. I’ll let Ruff rewrite that import block automatically, then rerun lint and formatting.
+
+Ran terminal command: .\.venv\Scripts\python.exe -m ruff check --fix tests/test_database_integration.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff check .; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff format --check .
+Completed with input: .\.venv\Scripts\python.exe -m ruff check --fix tests/test_database_integration.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff check .; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff format --check .
+
+Lint now passes; Ruff formatting found four purely mechanical wraps. I’m applying the formatter to the project files and then rerunning both style checks before moving to mypy.
+
+Ran terminal command: .\.venv\Scripts\python.exe -m ruff format .; .\.venv\Scripts\python.exe -m ruff check .; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff format --check .
+
+Ruff lint and formatting now pass. I’m running strict mypy across the app, tests, and scripts next; any typing issues will be corrected before I touch the runtime/service integration.
+
+Ran terminal command: .\.venv\Scripts\python.exe -m mypy
+Completed with input: .\.venv\Scripts\python.exe -m mypy
+
+Strict mypy found one missing local annotation on the index-query result. I’m adding the concrete `dict[str, str]` type and will rerun mypy immediately.
+
+Ran terminal command: .\.venv\Scripts\python.exe -m mypy
+
+Strict mypy is now clean after annotating the schema-index query. Before exercising Alembic offline and the unit suite, I’m fixing a migration-logging mismatch (the minimal `alembic.ini` has no logging sections), registering the pytest marker, adding CI’s PostgreSQL service, and documenting a separate disposable local test database.
+
+That combined patch was rejected because each patch call in a tool batch needs its own explanation field; none of those edits were applied. I’m splitting it into standard individual patches so the protected `docs` scope stays clear.
+
+The Alembic file’s import block has changed since it was created—likely from the formatter—so the combined context no longer matches. I’m rereading the exact current snippets and will patch against them.
+
+The reread shows the integration marker and CI PostgreSQL service are already present, and the README has local bootstrap steps; the failed combined patch partially aligned those existing files. I’ll preserve them and make only the confirmed Alembic logging fix now, then validate Alembic’s offline script path plus all gates and unit tests.
+
+The Alembic logging mismatch is fixed without changing migration behavior. I’m running the focused source-quality checks now; after that I’ll test settings and run Alembic in offline SQL mode to verify the migration environment without a server.
+
+Ran terminal command: .\.venv\Scripts\python.exe -m ruff check .; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff format --check .; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m mypy
+Completed with input: .\.venv\Scripts\python.exe -m ruff check .; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff format --check .; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m mypy
+
+Lint passes, but Ruff expects one fewer blank line in `env.py`; I’m applying that formatting correction and rerunning the same style/type checks.
+
+Ran terminal command: .\.venv\Scripts\python.exe -m ruff format alembic/env.py; .\.venv\Scripts\python.exe -m ruff check .; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff format --check .; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m mypy
+
+Ruff, formatter, and strict mypy now pass. I’m running the settings unit tests and generating Alembic’s offline SQL next; offline compilation checks the schema migration structure even though this machine has no PostgreSQL service.
+
+Ran terminal command: .\.venv\Scripts\python.exe -m pytest tests/test_settings.py
+
+Ran terminal command: $env:DATABASE_URL = 'postgresql://user:placeholder@localhost/test_db'; .\.venv\Scripts\python.exe -m alembic upgrade head --sql | Out-Null
+
+Settings tests pass (12), and Alembic successfully renders the initial migration to offline SQL. I’m adding one small database unit test to verify connection failures are wrapped as `DatabaseConnectionError` rather than leaking as or being confused with integrity violations, then I’ll run the full suite and gates. 
+
+Ran terminal command: .\.venv\Scripts\python.exe -m ruff check .; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff format --check .; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m mypy; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m pytest tests/test_settings.py tests/test_database_unit.py
+Completed with input: .\.venv\Scripts\python.exe -m ruff check .; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff format --check .; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m mypy; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m pytest tests/test_settings.py tests/test_database_unit.py
+
+Ruff found one nested `pytest.raises` context in the new unit test. I’m flattening it and rerunning the same focused validation chain.
+
+Ran terminal command: .\.venv\Scripts\python.exe -m ruff check .; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m ruff format --check .; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m mypy; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m pytest tests/test_settings.py tests/test_database_unit.py
+
+The unit tests now prove defaults/overrides and that psycopg operational connection failures become a custom database error. I’m separating the local integration database from the app database in the placeholder/setup instructions; CI will use its own disposable `url_shortener_test` service database.
+
+The README paragraph didn’t match its current wrapping, so that combined edit was rejected. I’m reading the exact relevant lines and will apply the environment/CI updates separately from the README text.
+
+The local and CI integration configurations now use a separate `url_shortener_test` database. I’m running the full quality script, all tests, and offline Alembic SQL generation; I’ll clearly separate tests that execute from PostgreSQL tests that cannot run without Docker/service availability here.
+
+Ran terminal command: $env:DATABASE_URL = 'postgresql://url_shortener:placeholder@localhost/url_shortener'; .\.venv\Scripts\python.exe scripts/check.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m pytest; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m alembic upgrade head --sql | Out-Null
+
+All quality gates pass; 14 non-DB tests pass, while the five marked PostgreSQL integration tests skip because no test database is configured. Alembic renders the migration offline; I’m checking whether Docker exists in its usual Windows install path before finalizing that integration-test limitation.
+
+Ran terminal command: @('C:\Program Files\Docker\Docker\resources\bin\docker.exe','C:\Program Files\Docker\Docker\Docker Desktop.exe',"$env:ProgramFiles\Docker\Docker\resources\bin\docker.exe") | ForEach-Object { [PSCustomObject]@{Path=$_; Exists=(Test-Path $_)} } | Format-Table -AutoSize
+
+Docker is absent from PATH and the standard install locations, so live PostgreSQL tests cannot run in this environment. I also found the local README still needs the new dedicated test-database creation command and `TEST_DATABASE_URL` assignment; I’m adding those outside `docs` before the final audit.
+
+Read , lines 55 to 95
+
+The full local suite runs with 14 passing and five integration cases explicitly skipped because Docker/PostgreSQL are unavailable; CI is configured to run those against its PostgreSQL service. I’m doing the final quality/YAML/whitespace audit now, then I’ll report the locally unverified DB checks plainly.
+
+Ran terminal command: .\.venv\Scripts\python.exe -c "import yaml; yaml.safe_load(open('docker-compose.yml', encoding='utf-8')); yaml.safe_load(open('.github/workflows/quality.yml', encoding='utf-8')); print('Compose and CI YAML parsed.')"; $git = 'C:\Program Files\Git\cmd\git.exe'; & $git diff --check; & $git status --short
+
+Checked , , , , , , , , no problems found
+
+Source diagnostics are clean and both YAML files parse. The repository-wide whitespace check found trailing whitespace in the already-modified `AI_usage_log.md`; I won’t touch it. I’m rerunning the whitespace check scoped to this task’s files and marking the task’s local PostgreSQL test status as blocked by missing Docker.
+
+Ran terminal command: $git = 'C:\Program Files\Git\cmd\git.exe'; & $git diff --check -- .github/workflows/quality.yml README.md pyproject.toml requirements.in requirements.txt requirements-dev.txt; & $git status --short -- .github/workflows/quality.yml README.md pyproject.toml requirements.in requirements.txt requirements-dev.txt .env.example alembic.ini alembic docker-compose.yml tests/test_settings.py tests/test_database_unit.py tests/test_database_integration.py url_shortener/app.py url_shortener/database.py url_shortener/settings.py docs
+
+Starting: *Compile dependencies and validate* (4/4)
+
+Implementation and test wiring are complete. I’m rerunning the exact shared gate runner and full pytest once at the final state; the expected result here is unit passes with PostgreSQL integration tests skipped because Docker/PostgreSQL cannot be started locally.
+
+Ran terminal command: .\.venv\Scripts\python.exe scripts/check.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m pytest
+
+Final gates pass and unit tests pass. PostgreSQL integration cases are present in the suite and CI, but five are skipped locally because neither Docker nor a PostgreSQL listener is available; I’m recording that verification limitation and then I’ll provide the exact file list and local run commands.
+
+Updated todo list
+
+Implemented Task 3 outside `docs`. The FastAPI app has a single-process lifespan that opens a bounded psycopg pool; it has no create, redirect, or form endpoints. The initial Alembic migration creates the requested `links` table, checks, primary key, and digest index. Compose and CI each configure PostgreSQL as the database service.
+
+**Files changed**
+- `quality.yml`
+- `README.md`
+- `pyproject.toml`
+- `requirements.in`
+- `requirements-dev.in`
+- `requirements.txt`
+- `requirements-dev.txt`
+- `.env.example`
+- `docker-compose.yml`
+- `alembic.ini`
+- `env.py`
+- `script.py.mako`
+- `20260929_0001_create_links.py`
+- `settings.py`
+- `database.py`
+- `app.py`
+- `test_settings.py`
+- `test_database_unit.py`
+- `test_database_integration.py`
+
+**Run Integration Tests Locally**
+With Docker installed, from PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+docker compose up -d --wait postgres
+docker compose ps
+docker compose exec -T postgres pg_isready -U url_shortener -d url_shortener
+docker compose exec -T postgres createdb -U url_shortener url_shortener_test
+
+$env:DATABASE_URL = "postgresql://url_shortener:replace-with-a-local-password@localhost:5432/url_shortener"
+$env:TEST_DATABASE_URL = "postgresql://url_shortener:replace-with-a-local-password@localhost:5432/url_shortener_test"
+python -m alembic upgrade head
+python -m pytest -m integration
+```
+
+**Verification**
+All four quality-gate categories pass; 14 tests pass. The five PostgreSQL integration tests are configured for CI but skipped locally because Docker and a local PostgreSQL server are unavailable. Alembic migration SQL rendered successfully offline. No files under `docs` were changed, and nothing was committed or pushed. The worktree has a pre-existing `AI_usage_log.md` modification that I left untouched.
+
+**Decisions to Review**
+I used `DB_POOL_MIN_SIZE`, `DB_POOL_MAX_SIZE`, `DB_POOL_WAIT_MS`, `DB_CONNECT_TIMEOUT_SECONDS`, and `DB_STATEMENT_TIMEOUT_MS` for pool settings, and selected `postgres:16-alpine` for Compose and CI. Database pool, connection, and statement failures are wrapped in distinct database error classes; unique-constraint violations remain psycopg integrity errors.
+
+Made changes.

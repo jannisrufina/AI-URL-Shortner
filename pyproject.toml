@@ -22,3 +22,4 @@ show_error_codes = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers"
+markers = ["integration: requires a PostgreSQL test database"]

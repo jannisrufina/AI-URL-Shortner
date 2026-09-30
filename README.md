@@ -51,3 +51,44 @@ reports an advisory.
 The test scan skips B101 only because plain assertions are idiomatic in tests;
 the application-code scan does not skip it.
 
+## PostgreSQL bootstrap
+
+Copy `.env.example` to `.env`, then start the single PostgreSQL service and wait
+for its Compose health check before migrating:
+
+```powershell
+Copy-Item .env.example .env
+docker compose up -d --wait postgres
+docker compose ps
+docker compose exec -T postgres pg_isready -U url_shortener -d url_shortener
+docker compose exec -T postgres createdb -U url_shortener url_shortener_test
+```
+
+Set the application environment, apply the schema only through Alembic, and
+start the single Uvicorn worker:
+
+```powershell
+$env:DATABASE_URL = "postgresql://url_shortener:replace-with-a-local-password@localhost:5432/url_shortener"
+$env:PUBLIC_BASE_URL = "https://jrb.sh"
+$env:DB_POOL_MIN_SIZE = "1"
+$env:DB_POOL_MAX_SIZE = "10"
+$env:DB_POOL_WAIT_MS = "250"
+$env:DB_CONNECT_TIMEOUT_SECONDS = "2"
+$env:DB_STATEMENT_TIMEOUT_MS = "1000"
+python -m alembic upgrade head
+python -m uvicorn url_shortener.app:app --host 127.0.0.1 --port 8000 --workers 1
+```
+
+The 250 ms pool-acquisition wait is an overload/failure bound, not an expected
+redirect wait. For PostgreSQL integration tests, point at the separate
+disposable database created above:
+
+```powershell
+$env:TEST_DATABASE_URL = "postgresql://url_shortener:replace-with-a-local-password@localhost:5432/url_shortener_test"
+python -m pytest -m integration
+```
+
+CI starts a PostgreSQL service container and supplies `TEST_DATABASE_URL`
+automatically. With no test database configured, integration tests skip
+explicitly.
+

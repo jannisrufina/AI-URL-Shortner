@@ -1,2 +1,4 @@
 fastapi
-psycopg[binary]
+alembic
+psycopg[binary,pool]
+uvicorn
