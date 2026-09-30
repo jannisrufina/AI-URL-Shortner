@@ -73,11 +73,11 @@ def test_rejects_leading_and_trailing_whitespace(url: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "character", 
+    "character",
     [
-        "\ud800", 
-        "\udbff", 
-        "\udc00", 
+        "\ud800",
+        "\udbff",
+        "\udc00",
         "\udfff",
     ],
 )

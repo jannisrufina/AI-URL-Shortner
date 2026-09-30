@@ -239,6 +239,7 @@ def test_lone_surrogate_in_url_returns_standard_422(
     assert response.json()["error"]["code"] == "invalid_url"
     assert "ud800" not in response.text
 
+
 def test_deeply_nested_json_returns_standard_422(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

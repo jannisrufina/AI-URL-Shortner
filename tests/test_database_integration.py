@@ -1,4 +1,5 @@
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -7,7 +8,6 @@ from uuid import uuid4
 
 import psycopg
 import pytest
-import threading
 from alembic.config import Config
 from fastapi.testclient import TestClient
 
