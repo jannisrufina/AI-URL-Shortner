@@ -89,6 +89,5 @@ python -m pytest -m integration
 ```
 
 CI starts a PostgreSQL service container and supplies `TEST_DATABASE_URL`
-automatically. With no test database configured, integration tests skip
-explicitly.
+automatically. CI starts a PostgreSQL service container and sets REQUIRE_DB=1, so a missing or unreachable test database fails the run. Local runs without TEST_DATABASE_URL skip the integration tests.
 

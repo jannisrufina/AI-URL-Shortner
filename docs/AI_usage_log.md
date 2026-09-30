@@ -6,7 +6,7 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 
 - **Tools:** GitHub Copilot in VS Code (requirements, design, tasks, code generation); Claude in a separate chat (planning guidance, reviewing Copilot's outputs, drafting and refining prompts). I made every decision; neither tool committed or pushed anything.
 - **Security practices:** private repository; no secrets, credentials, or assignment source documents in prompts; `.env` ignored; every AI change reviewed as a diff before commit.
-- **Stages so far:** Planning (requirements, design, tasks) | Task 1 (quality gates and CI) | Task 2 (in progress)
+- - **Stages so far:** Planning (requirements, design, tasks) | Task 1 (quality gates and CI) | Task 2 (architecture overview) | Task 3 (app bootstrap, schema, pool) | Task 4 (next)
 
 ## Decisions (what the AI proposed, what I chose, why)
 
@@ -26,6 +26,9 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | D-12 | UI | Not required | Single-page create form, added as FR-10 | More user-friendly; kept minimal |
 | D-13 | Bandit scope (Task 1) | Rewrote the smoke test to avoid `assert` | Bandit runs on the package with all rules and on tests with only B101 skipped | Pytest relies on `assert`; scoped exclusion instead of a workaround |
 | D-14 | Dependencies (Task 1) | Pinned top-level packages only | Compiled, fully pinned lock files (pip-tools); no hashes | Reproducible installs and a meaningful audit; hashes deferred |
+| D-15 | Architecture doc gaps (Task 2) | Overview reported "no contradictions or gaps" | Accepted the draft as generated; small fixes deferred to Task 12 (reconcile with built code) | Moving fast; the doc gets rewritten against the real code anyway |
+| D-16 | Where DB tests run (Task 3) | AI could only run offline checks (Docker missing) and left 5 integration tests skipped | Installed Docker Desktop (ARM64 build) and ran the tests against a real PostgreSQL | Compose is a required deliverable (NFR-6) and the migration, indexes, and pool behavior needed real verification |
+| D-17 | Test database and defaults (Task 3) | Separate `url_shortener_test` database; `DB_*` setting names; `postgres:16-alpine` image | Accepted as proposed | Tests must not touch application data; defaults match the design |
 
 ## AI errors and gaps I caught
 
@@ -41,6 +44,10 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | E-8 | Task 1: test rewritten to dodge a Bandit finding | Second-AI review | D-13 |
 | E-9 | Task 1: only top-level dependencies pinned | Second-AI review | D-14 |
 | E-10 | Task 1: gate output printed my full Python path | My review | Removed the path from the printed command |
+| E-11 | Task 2: overview claimed no gaps, but the create-flow retry edge skips code regeneration, neither flow shows the 503 paths, and the Alembic decision cites requirements that do not mention migrations | Second-AI review | Deferred to Task 12 (D-15) |
+| E-12 | Task 3: five integration tests skipped locally because Docker was not installed, so the migration, constraints, and pool behavior were unverified | AI's own report, then my review | Installed Docker Desktop (ARM64 build); ran the integration tests locally against a real PostgreSQL: 5 passed. CI (Actions run 7) also ran them: 19 passed, 0 skipped |
+| E-13 | Task 3: integration tests skip when `TEST_DATABASE_URL` is missing, so CI could pass without running them | Second-AI review | Added REQUIRE_DB; verified it fails locally without a database; CI passed. |
+| E-14 | Task 3: tests errored with "database url_shortener_test does not exist"; Compose creates only the main database | Running the integration tests | Created the test database with `createdb`. Kept it as a documented manual setup step (in the README and Task 14 setup instructions) instead of automating it: it is a one-time command, and CI's PostgreSQL service creates the test database itself |
 
 ## Planning
 ### Prompt: 
@@ -1157,3 +1164,154 @@ All four quality-gate categories pass; 14 tests pass. The five PostgreSQL integr
 I used `DB_POOL_MIN_SIZE`, `DB_POOL_MAX_SIZE`, `DB_POOL_WAIT_MS`, `DB_CONNECT_TIMEOUT_SECONDS`, and `DB_STATEMENT_TIMEOUT_MS` for pool settings, and selected `postgres:16-alpine` for Compose and CI. Database pool, connection, and statement failures are wrapped in distinct database error classes; unique-constraint violations remain psycopg integrity errors.
 
 Made changes.
+
+### Prompt: 
+Task 3 follow-up. Do not modify docs/. Do not commit or push.
+1. In CI, integration tests must fail (not skip) if TEST_DATABASE_URL is
+   missing or the database is unreachable: add a REQUIRE_DB env var set in
+   .github/workflows/quality.yml, and make the integration fixture fail when
+   it is set. Local runs without a database may still skip.
+2. Add `path_separator = os` to alembic.ini to remove the Alembic
+   DeprecationWarning.
+3. Confirm requirements.in and requirements-dev.in contain only what Task 3
+   needs (no jinja2 or python-multipart), and show me the diff.
+Run all gates and pytest, including the integration tests.
+
+#### Response: 
+I’ll inspect the current integration fixture, workflow, Alembic config, and both dependency inputs, then check whether PostgreSQL is available locally. I’ll edit only non-`docs` files and make CI fail fast when its required database URL is missing or unreachable.
+
+Ran terminal command: docker --version; docker compose version; Test-NetConnection -ComputerName localhost -Port 5432 -InformationLevel Quiet
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Docker and PostgreSQL connectivity are available now. The fixture currently skips when `TEST_DATABASE_URL` is empty; I’ll add `REQUIRE_DB` so CI fails in that case, while local runs with no URL still skip. I’ll also add Alembic’s explicit path separator; the dependency inputs already contain only the app/runtime and quality/test dependencies, with no Jinja or multipart.
+
+Apply Patch
+
+Apply Patch
+
+Apply Patch
+
+The patch batch was rejected because each individual patch call requires its own explanation; no edits were applied. I’m reapplying the three small changes one at a time.
+
+Generating patch (10 lines) in 
+
+
+```
+
+```
+
+
+Generating patch (8 lines) in 
+
+
+```
+
+```
+
+
+Generating patch (8 lines) in 
+
+
+```
+
+```
+All three changes are applied. I’m running Ruff on the touched fixture first; afterward I’ll verify the missing-URL hard failure and local skip behavior, then start PostgreSQL and run the full suite.
+
+Ran terminal command: .\.venv\Scripts\python.exe -m ruff check tests/test_database_integration.py
+
+Ruff passes. I’m testing both fixture modes directly: CI-style `REQUIRE_DB=1` with no URL must fail, while a local invocation without either variable may skip.
+
+Ran terminal command: Remove-Item Env:TEST_DATABASE_URL -ErrorAction SilentlyContinue; $env:REQUIRE_DB = '1'; .\.venv\Scripts\python.exe -m pytest -m integration; $requiredExit = $LASTEXITCODE; Remove-Item Env:REQUIRE_DB -ErrorAction SilentlyContinue; if ($requiredExit -eq 0) { throw 'Integration tests unexpectedly passed with REQUIRE_DB set and no TEST_DATABASE_URL.' }; Write-Output "Confirmed required mode fails (exit $requiredExit)."; .\.venv\Scripts\python.exe -m pytest -m integration
+
+The fixture behavior is confirmed: required mode fails all five integration tests when `TEST_DATABASE_URL` is missing; local mode skips them. I’m starting the Compose PostgreSQL service now, waiting for health, and will then run integration tests against it.
+
+Ran terminal command: $env:POSTGRES_USER = 'url_shortener'; $env:POSTGRES_PASSWORD = 'local-test-password'; $env:POSTGRES_DB = 'url_shortener'; $env:POSTGRES_PORT = '5432'; docker compose up -d --wait postgres; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; docker compose ps; docker compose exec -T postgres pg_isready -U url_shortener -d url_shortener
+
+PostgreSQL is healthy and accepting connections. I’m running the marked integration suite with `REQUIRE_DB=1` and the dedicated test database URL so none of these tests can silently skip.
+
+Ran terminal command: $env:TEST_DATABASE_URL = 'postgresql://url_shortener:local-test-password@localhost:5432/url_shortener_test'; $env:REQUIRE_DB = '1'; .\.venv\Scripts\python.exe -m pytest -m integration
+Completed with input: $env:TEST_DATABASE_URL = 'postgresql://url_shortener:local-test-password@localhost:5432/url_shortener_test'; $env:REQUIRE_DB = '1'; .\.venv\Scripts\python.exe -m pytest -m integration
+
+The integration command completed with a captured report; I’m reading the results now before running the full gates and suite.
+
+Read , lines 1 to 240
+
+`REQUIRE_DB` behaved correctly, but the live integration run exposed a stale PostgreSQL Docker volume: the running server rejects the newly supplied local test password. I won’t remove or recreate the volume; I’m checking the container’s existing local roles so I can repair only the disposable test credentials if that is safe.
+
+Ran terminal command: docker compose ps; docker compose exec -T postgres psql -U postgres -d postgres -c "SELECT current_user, current_database();"
+Completed with input: docker compose ps; docker compose exec -T postgres psql -U postgres -d postgres -c "SELECT current_user, current_database();"
+
+Ran terminal command: docker compose exec -T postgres env | Select-String 'POSTGRES_(USER|DB|PASSWORD)'
+
+The existing container has a persisted database initialized with different roles/passwords (`postgres` role is absent), so I won’t modify its credentials or volume. I can preserve it and still test safely by starting a separate Compose project on port 55432 with its own fresh volume; I’m doing that now.
+
+Ran terminal command: $env:POSTGRES_USER = 'url_shortener'; $env:POSTGRES_PASSWORD = 'local-test-password'; $env:POSTGRES_DB = 'url_shortener_test'; $env:POSTGRES_PORT = '55432'; docker compose -p task3-validation up -d --wait postgres; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; docker compose -p task3-validation ps; docker compose -p task3-validation exec -T postgres pg_isready -U url_shortener -d url_shortener_test
+
+The isolated PostgreSQL service is healthy on 55432, with its own fresh volume; the pre-existing container remains untouched. I’m rerunning the integration suite in required mode against this new disposable database.
+
+Ran terminal command: $env:TEST_DATABASE_URL = 'postgresql://url_shortener:local-test-password@localhost:55432/url_shortener_test'; $env:REQUIRE_DB = '1'; .\.venv\Scripts\python.exe -m pytest -m integration
+
+All five integration tests now pass against the isolated PostgreSQL container, including schema constraints, repeatable migrations, pool exhaustion, and statement timeout handling. I’m running the complete gate runner and full pytest with `REQUIRE_DB=1` next so integration tests are guaranteed to execute.
+
+Ran terminal command: $env:TEST_DATABASE_URL = 'postgresql://url_shortener:local-test-password@localhost:55432/url_shortener_test'; $env:REQUIRE_DB = '1'; .\.venv\Scripts\python.exe scripts/check.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m pytest
+
+The complete quality gates pass, and all 19 tests pass with integration required. I’m doing one final negative check with an unreachable test URL to prove CI-style mode errors instead of skipping, then I’ll verify the change list excludes `docs` and leave both Docker projects’ data untouched.
+
+Ran terminal command: $env:TEST_DATABASE_URL = 'postgresql://url_shortener:local-test-password@localhost:55433/url_shortener_test'; $env:REQUIRE_DB = '1'; .\.venv\Scripts\python.exe -m pytest tests/test_database_integration.py::test_migration_applies_and_is_repeatable -m integration; $failure = $LASTEXITCODE; $env:TEST_DATABASE_URL = 'postgresql://url_shortener:local-test-password@localhost:55432/url_shortener_test'; if ($failure -eq 0) { throw 'Integration test unexpectedly passed against an unreachable database.' }; Write-Output "Confirmed unreachable required DB fails (exit $failure)."
+
+The unreachable-DB run produced a large captured error report; my first attempt to open that report used an incorrect path. I’m reopening the actual terminal output and then will perform the scoped worktree check.
+
+Read , lines 1 to 100
+
+Read , lines 100 to 180
+
+The required-mode integration suite passes all five tests on the isolated service, and the full suite passes 19/19 with `REQUIRE_DB=1`. I’m stopping only the temporary `task3-validation` container (leaving its volume and the pre-existing Compose service intact) and capturing the scoped diff/status; no `docs` paths will be edited.
+
+Ran terminal command: docker compose -p task3-validation stop postgres; $git = 'C:\Program Files\Git\cmd\git.exe'; & $git diff --check -- .github/workflows/quality.yml alembic.ini pyproject.toml tests/test_database_integration.py requirements.in requirements.txt requirements-dev.txt; & $git status --short; & $git diff -- .github/workflows/quality.yml alembic.ini pyproject.toml tests/test_database_integration.py requirements.in
+
+The scoped diff contains exactly the three requested changes; `requirements.in` and `requirements-dev.in` are unchanged and contain no Jinja or multipart dependencies. The temporary validation container is stopped but its volume is preserved; I’m closing out the task checklist.
+
+Completed: *Compile dependencies and validate* (4/4)
+
+Updated only these files; no `docs` files were changed.
+
+```diff
+--- .github/workflows/quality.yml
++++ .github/workflows/quality.yml
+@@
+     env:
++      REQUIRE_DB: "1"
+       TEST_DATABASE_URL: postgresql://url_shortener:local-test-password@localhost:5432/url_shortener_test
+
+--- alembic.ini
++++ alembic.ini
+@@
+ prepend_sys_path = .
++path_separator = os
+ sqlalchemy.url = postgresql+psycopg://
+
+--- tests/test_database_integration.py
++++ tests/test_database_integration.py
+@@
+     value = os.environ.get("TEST_DATABASE_URL", "").strip()
+     if not value:
++        if os.environ.get("REQUIRE_DB", "").strip().lower() in {"1", "true", "yes"}:
++            pytest.fail("REQUIRE_DB is set but TEST_DATABASE_URL is missing")
+         pytest.skip("Set TEST_DATABASE_URL to run PostgreSQL integration tests")
+```
+
+`requirements.in` contains FastAPI, Alembic, `psycopg[binary,pool]`, and Uvicorn. `requirements-dev.in` adds the test and quality tools; neither input includes Jinja or `python-multipart`.
+
+All quality gates passed, and pytest passed **19 tests**, including all five PostgreSQL integration tests. I also verified that required mode fails when the URL is missing or unreachable, while local mode can skip without a database. The temporary PostgreSQL container is stopped; its volume and the pre-existing database were left intact. No commit or push was made.
+
+Made changes.
+
