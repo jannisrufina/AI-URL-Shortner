@@ -8,13 +8,17 @@ line-length = 88
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I"]
+select = ["E", "F", "I", "B", "UP", "SIM"]
 
 [tool.ruff.format]
 quote-style = "double"
 
 [tool.mypy]
 python_version = "3.11"
-files = ["url_shortener", "tests"]
+files = ["url_shortener", "tests", "scripts"]
 strict = true
 show_error_codes = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"

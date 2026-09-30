@@ -905,3 +905,23 @@ The combined quality command passes Ruff lint, Ruff formatting, mypy, Bandit at 
 Dependencies are pinned to the package-index versions available during setup. PostgreSQL’s binary psycopg extra is included for simpler local installation. The GitHub Actions references use exact release-version tags as requested.
 
 Made changes.
+
+## Prompt:
+Task 1 follow-up. Do not modify docs/. Do not commit or push. Make these
+changes and show me the diff:
+1. scripts/check.py: run Bandit twice: `bandit -r url_shortener` and
+   `bandit -r tests -s B101` (comment why B101 is skipped for tests only).
+   Run every gate and report all failures at the end, not just the first.
+2. tests/test_smoke.py: use a plain assert.
+3. pyproject.toml: Ruff select ["E","F","I","B","UP","SIM"]; mypy files
+   include "scripts"; add [tool.pytest.ini_options] with testpaths ["tests"]
+   and addopts "--strict-markers". Fix any new findings in code; do not add
+   ignores.
+4. Dependencies: convert to requirements.in / requirements-dev.in and generate
+   fully pinned requirements.txt / requirements-dev.txt with pip-compile;
+   CI installs the compiled files; pip-audit runs with --no-deps
+   --disable-pip against the compiled dev file.
+5. Workflow: persist-credentials false on checkout, timeout-minutes 10,
+   if: always() on the test step.
+Run all gates and pytest, and re-run the deliberate-failure probes for each
+gate. List every file changed.
