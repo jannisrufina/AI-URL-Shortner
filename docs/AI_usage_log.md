@@ -517,3 +517,130 @@ requirements.md or any design decisions.
 4. Split the architecture reconciliation out of Task 2 into its own task
    after the load tests, so Task 2 has no circular dependency.
 Show only changed sections.
+
+## Response:
+I’ll audit the current requirements and every citation in `design.md` and `tasks.md` before editing. Then I’ll change only those two docs: correct semantic references, make Tasks 14–15 must-have with minimal scope and engineer-owned clarification, and add a non-circular architecture reconciliation task after load testing.
+
+Read 
+
+Read 
+
+Read 
+
+The audit found several semantic mismatches beyond the four called out: retention cites should use L-3, alternate IP notation L-5, proxy sharing L-6, and create status FR-12. I’m correcting those, and aligning the design’s performance test with NFR-3’s average-load pass/fail rule while keeping peak results report-only.
+
+Generating patch (32 lines) in 
+
+
+```
+
+```
+I’m updating task references by meaning, not by renumbering alone: retention maps to L-3, data volume/seeding to A-4/A-8, and limits tests to L-5/L-6. I’m also extracting architecture reconciliation into its own post-load task, shifting later task numbers, and keeping scenario implementation approval-gated while making both scenarios must-have at minimal scope.
+
+Generating patch (31 lines) in 
+
+
+```
+
+```
+
+
+Generating patch (81 lines) in 
+
+
+```
+
+```
+The scenarios are now must-have but still approval-gated, and Task 15 uses an engineer-authored interpretation of “Make the service more reliable.” Architecture reconciliation is now independent and follows load testing; I’m checking citation consistency, numbering, and file diagnostics next.
+
+Checked , , no problems found
+
+Searched for regex `\b(?:FR|NFR|A|L)-\d+\b` (`**/docs/design.md`), 61 results
+
+Searched for regex `\b(?:FR|NFR|A|L)-\d+\b` (`**/docs/tasks.md`), 15 results
+
+Searched for regex `\b(?:FR|NFR|A|L)-\d+\b` (`**/docs/requirements.md`), 34 results
+
+The semantic review is exposing a few more concrete citation fixes: Task 9’s test scope needs to state the behavior it claims to cover, while the design’s alternate-IP and proxy notes need L-5/L-6. I’m making the traceability explicit and moving reconciliation into a distinct Task 12, with later task numbers/dependencies updated consistently.
+
+Generating patch (9 lines) in 
+
+
+```
+
+```
+
+
+Generating patch (39 lines) in 
+
+
+```
+
+```
+
+
+Generating patch (75 lines) in 
+
+The architecture/scenario patch didn’t match the file’s current task numbering, so it made no change. I’m checking the affected tail section and will re-anchor the same edits to the actual headings before validating.
+
+Read 
+
+The refreshed file confirms the reconciliation task is now separate after load testing, and both scenario tasks remain approval-gated. One last dependency was stale after the split: the OpenAPI export should depend on the form task too, so I’m correcting that before final validation.
+
+Generating patch (6 lines) in 
+
+
+```
+
+```
+
+
+Checked , , no problems found
+
+Searched for regex `\b(?:FR|NFR|A|L)-\d+\b` (`**/docs/design.md`), 61 results
+
+Searched for regex `\b(?:FR|NFR|A|L)-\d+\b` (`**/docs/tasks.md`), 16 results
+
+Searched for regex `\b(?:FR|NFR|A|L)-\d+\b` (`**/docs/requirements.md`), 34 results
+
+One final semantic pass found three minor overclaims: the integration task should explicitly assert the configured short URL, the 100:1 assumption should appear in the benchmark criteria if cited, and architecture reconciliation does not itself satisfy a latency target. I’m tightening those references and acceptance criteria, then I’ll run diagnostics once more.
+
+Generating patch (6 lines) in 
+
+
+```
+
+```
+
+
+Generating patch (14 lines) in 
+
+
+```
+
+```
+
+
+Checked , , no problems found
+
+Searched for regex `\b(?:FR|NFR|A|L)-\d+\b` (`**/docs/tasks.md`), 17 results
+
+Searched for regex `\b(?:FR|NFR|A|L)-\d+\b` (`**/docs/design.md`), 61 results
+
+Searched for regex `\b(?:FR|NFR|A|L)-\d+\b` (`**/docs/requirements.md`), 34 results
+
+**Changed sections only**
+
+- **Design: data-model citation:** Removed the unrelated A-3 citation; retained L-3 for expired-row retention.
+- **Design: URL validation and limitations:** Added L-5 for alternate IPv4 spellings and L-6 for shared proxy rate-limit buckets.
+- **Design: API and tests:** Added FR-12 where the `200` response for new and reused creates is specified or tested.
+- **Design: performance test:** Uses A-6 average load for the NFR-3 pass/fail result, reports peak-load results separately, and includes the cited A-5 workload ratio.
+- **Task 3:** Replaced A-3 with A-4 and L-3. **Task 7:** Replaced A-3 with L-3. **Task 10:** Uses A-4 and A-8, not A-3. **Task 11:** Removed L-5/L-6 citations.
+- **Task 9:** Tightened acceptance criteria to substantiate its integration-test citations.
+- **Architecture reconciliation:** Removed from Task 2 and added as a separate Task 12 after load tests; subsequent tasks were renumbered.
+- **Scenario tasks:** Brownfield analytics and ambiguous-requirement scenarios are must-have at minimal scope and retain approval gates. The engineer supplies the clarification and assumptions for “Make the service more reliable.”
+- **Setup instructions:** Retained as Task 14.
+
+No cited IDs are missing from `requirements.md`. Diagnostics found no errors.
+
+Made changes.
