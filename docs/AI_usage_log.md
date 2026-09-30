@@ -2434,3 +2434,28 @@ $env:REQUIRE_DB = "1"
 One design choice to review: `/{code:path}` catches encoded traversal paths so they receive the standard JSON 404; FastAPI’s docs routes and the POST route remain registered ahead of it. The code comment notes that future fixed GET paths should also be registered before this route.
 
 Made changes.
+#### Note:
+Changes made. Here is the output for application
+=> $r = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/links -ContentType "application/json" -Body '{"url":"https://example.com/page?x=1"}'
+=> $r
+
+code    short_url              expires_at
+----    ---------              ----------
+VmTEoEm https://jrb.sh/VmTEoEm
+
+
+=> curl.exe -i "http://127.0.0.1:8000/$($r.code)"
+HTTP/1.1 302 Found
+date: Wed, 30 Sep 2026 22:00:56 GMT
+server: uvicorn
+content-length: 0
+location: https://example.com/page?x=1
+
+=> curl.exe -i "http://127.0.0.1:8000/..%2Fetc"
+HTTP/1.1 404 Not Found
+date: Wed, 30 Sep 2026 22:01:00 GMT
+server: uvicorn
+content-length: 68
+content-type: application/json
+
+{"error":{"code":"not_found","message":"Short link was not found."}}
