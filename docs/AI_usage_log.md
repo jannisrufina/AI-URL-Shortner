@@ -6,7 +6,10 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 
 - **Tools:** GitHub Copilot in VS Code (requirements, design, tasks, code generation); Claude in a separate chat (planning guidance, reviewing Copilot's outputs, drafting and refining prompts). I made every decision; neither tool committed or pushed anything.
 - **Security practices:** no secrets or credentials in prompts; `.env` is ignored and only placeholder values are committed; the assignment text was shared once with the planning chat (Claude) to understand requirements and was not given to Copilot; every AI change was reviewed, tested, and run through the quality gates before I relied on it.
-- **Stages so far:** Planning (requirements, design, tasks) | Task 1 (quality gates and CI) | Task 2 (architecture overview) | Task 3 (app bootstrap, schema, pool) | Task 4 (URL validation) | Task 5 (in-process create limiter) | Task 6 (create persistence and JSON API) | Task 7 (redirects and failure handling) | Task 8 (next)
+- **Stages so far:**
+  - Planning: requirements, design, tasks
+  - Tasks 1 to 8: quality gates and CI, architecture overview, app bootstrap, URL validation, create limiter, create API, redirects, create form
+  - Next: Task 9 (integration and end-to-end tests)
 
 ## Decisions (what the AI proposed, what I chose, why)
 
@@ -43,6 +46,8 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | D-29 | Redirect route shape (Task 7) | `GET /{code:path}` with a seven-character Base62 check before any database access | Accepted | Encoded traversal such as `/..%2Fetc` gets the standard JSON 404 instead of FastAPI's default body; side effect: every unknown GET path (including `GET /api/links`) returns the JSON 404, so `GET /` must be registered before this route |
 | D-30 | Testability seams (Task 7) | A small `_utc_now()` function and a no-op `record_click(link)` hook instead of patching `datetime` | Accepted | Patching the `datetime` class broke FastAPI's type inspection; the hook marks where click analytics will go (brownfield scenario) |
 | D-31 | Failure mapping (Task 7) | Database errors are not caught in the route; the existing handler returns the sanitized 503 | Accepted | A pool, connection, or statement-timeout failure must never be reported as "not found" |
+| D-32 | Form error handling (Task 8) | Global handlers return HTML only when the request is `POST /` (`_is_form_submission`); every other path keeps JSON | Accepted | The JSON API cannot receive HTML errors; one shared `create_short_link` service serves both paths |
+| D-33 | Form behavior accepted (Task 8) | The form refills the submitted values after an error (autoescaped); no CSRF token; security headers including a restrictive CSP on every HTML response | Accepted | Refilled values are escaped, so no XSS; no accounts or sessions exist (A-9), so there is nothing for CSRF to protect; the CSP is defense in depth |
 
 ## AI errors and gaps I caught
 
@@ -74,6 +79,7 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | E-24 | Task 6: I pushed my review edits without rerunning the quality gates; CI failed Ruff lint and format (import order, stray whitespace) | CI run [number] | `ruff check --fix` and `ruff format`, reran all gates, pushed; CI green [number]. I now run `scripts/check.py` before every push |
 | E-25 | Task 7: my `try/finally` edit cut the second half off two integration tests (the row-retained check and the whole revival test), leaving one with no assertions | Ruff F841 (unused variable) in `scripts/check.py`, then reading the file | Restored both tests; compared `git diff` to confirm nothing else was lost |
 | E-26 | Task 7: the AI could not run the 16 PostgreSQL integration tests (container credentials did not match), so its report said 153 passed and 16 skipped, with three new integration tests unrun | The AI's own report; I treated the skips as unverified | I ran them against my test database twice: [count] passed; confirmed create then redirect, expired-row retention, and revival work against real PostgreSQL |
+| E-27 | Task 8: the form tests had no check that the JSON API still returns JSON after the form changed the global handlers (the main risk), and the XSS test did not check that a quote cannot close an attribute | Second-AI review of the test file | Added a JSON-stays-JSON test and stricter XSS assertions (my edits), plus file-upload and invalid-bytes tests |
 
 ## Planning
 ### Prompt: 
