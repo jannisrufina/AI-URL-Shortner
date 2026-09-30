@@ -20,6 +20,11 @@ SET expires_at = CASE
 END
 RETURNING code, original_url, expires_at
 """
+_SELECT_BY_CODE = """
+SELECT code, original_url, expires_at
+FROM links
+WHERE code = %s
+"""
 
 
 class CodeGenerationExhaustedError(RuntimeError):
@@ -64,3 +69,11 @@ def create_or_reuse_link(
         return Link(code=row[0], original_url=row[1], expires_at=row[2])
 
     raise CodeGenerationExhaustedError("Could not allocate a unique short code")
+
+
+def get_link_by_code(database: Database, code: str) -> Link | None:
+    with database.connection() as connection:
+        row = connection.execute(_SELECT_BY_CODE, (code,)).fetchone()
+    if row is None:
+        return None
+    return Link(code=row[0], original_url=row[1], expires_at=row[2])

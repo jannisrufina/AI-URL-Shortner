@@ -1,3 +1,4 @@
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -6,12 +7,17 @@ from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from url_shortener.database import Database, DatabaseAccessError
 from url_shortener.expiry import ExpiryValidationError, parse_expiry
-from url_shortener.links import CodeGenerationExhaustedError, create_or_reuse_link
+from url_shortener.links import (
+    CodeGenerationExhaustedError,
+    Link,
+    create_or_reuse_link,
+    get_link_by_code,
+)
 from url_shortener.rate_limiter import (
     CreateRateLimitExceeded,
     SlidingWindowRateLimiter,
@@ -20,6 +26,8 @@ from url_shortener.rate_limiter import (
 )
 from url_shortener.settings import Settings
 from url_shortener.validation import URLValidationError, validate_url
+
+_SHORT_CODE_PATTERN = re.compile(r"[A-Za-z0-9]{7}")
 
 
 def _error_response(status_code: int, code: str, message: str) -> JSONResponse:
@@ -68,6 +76,18 @@ async def code_generation_exception_handler(
     return _error_response(
         503, "service_unavailable", "The service is temporarily unavailable."
     )
+
+
+def _not_found_response() -> JSONResponse:
+    return _error_response(404, "not_found", "Short link was not found.")
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def record_click(link: Link) -> None:
+    del link
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -139,6 +159,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "short_url": f"{public_base_url}/{link.code}",
             "expires_at": link.expires_at,
         }
+
+    # Register any future fixed GET paths before this dynamic route.
+    @application.get("/{code:path}", response_model=None)
+    async def redirect_link(code: str, request: Request) -> Response:
+        if _SHORT_CODE_PATTERN.fullmatch(code) is None:
+            return _not_found_response()
+
+        now = _utc_now()
+        link = await run_in_threadpool(
+            get_link_by_code, request.app.state.database, code
+        )
+        if link is None or (link.expires_at is not None and link.expires_at <= now):
+            return _not_found_response()
+
+        record_click(link)
+        return RedirectResponse(url=link.original_url, status_code=302)
 
     return application
 

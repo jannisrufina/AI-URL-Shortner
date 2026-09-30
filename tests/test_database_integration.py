@@ -342,3 +342,68 @@ def test_create_api_persists_and_reuses_link(database_url: str) -> None:
     assert first.json()["code"] == repeated.json()["code"]
     assert first.json()["short_url"] == f"https://jrb.sh/{first.json()['code']}"
     assert first.json()["expires_at"] is None
+
+
+def test_create_then_redirect_uses_stored_url(database_url: str) -> None:
+    settings = _base_settings(database_url)
+    submitted_url = f"https://example.test/path/{uuid4().hex}?q=value#part"
+    with TestClient(create_app(settings)) as client:
+        created = client.post("/api/links", json={"url": submitted_url})
+        redirected = client.get(f"/{created.json()['code']}", follow_redirects=False)
+
+    assert created.status_code == 200
+    assert redirected.status_code == 302
+    assert redirected.headers["location"] == submitted_url
+
+
+def test_expired_redirect_is_404_and_row_remains_stored(database_url: str) -> None:
+    settings = _base_settings(database_url)
+    database = Database(settings)
+    database.open()
+    submitted_url = f"https://example.test/expired/{uuid4().hex}"
+    created_at = datetime.now(UTC)
+    expired = create_or_reuse_link(
+        database,
+        submitted_url,
+        created_at - timedelta(seconds=1),
+        created_at,
+    )
+    database.close()
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get(f"/{expired.code}", follow_redirects=False)
+
+    with psycopg.connect(database_url) as connection:
+        retained = connection.execute(
+            "SELECT code FROM links WHERE code = %s", (expired.code,)
+        ).fetchone()
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
+    assert retained == (expired.code,)
+
+
+def test_repeat_create_revives_expired_redirect(database_url: str) -> None:
+    settings = _base_settings(database_url)
+    database = Database(settings)
+    database.open()
+    submitted_url = f"https://example.test/revive-redirect/{uuid4().hex}"
+    created_at = datetime.now(UTC)
+    expired = create_or_reuse_link(
+        database,
+        submitted_url,
+        created_at - timedelta(seconds=1),
+        created_at,
+    )
+    database.close()
+
+    with TestClient(create_app(settings)) as client:
+        before_revival = client.get(f"/{expired.code}", follow_redirects=False)
+        recreated = client.post("/api/links", json={"url": submitted_url})
+        after_revival = client.get(f"/{expired.code}", follow_redirects=False)
+
+    assert before_revival.status_code == 404
+    assert recreated.status_code == 200
+    assert recreated.json()["code"] == expired.code
+    assert after_revival.status_code == 302
+    assert after_revival.headers["location"] == submitted_url
