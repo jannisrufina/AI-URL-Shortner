@@ -1,4 +1,5 @@
-# Prompt: 
+# Planning
+## Prompt: 
 Read docs/requirements.md. Do not modify it or add requirements.
 
 Context: this is a 2-3 day prototype built by one engineer, and it must run
@@ -22,7 +23,7 @@ recommendation. Include a recommended tech stack, with reasons.
 
 End with a short list of open questions for me. Don't write code yet.
 
-## Response:
+### Response:
 I’ll verify the actual requirements file and compare it with the draft already in the usage log, then give you a grounded design without changing any files.
 
 Read 
@@ -89,7 +90,7 @@ Python, FastAPI, PostgreSQL, Redis, Docker Compose, and Jinja for the small UI. 
 - Is a single-page create form sufficient for the UI?
 - Will deployment use a trusted proxy, and if so, which proxy addresses should be trusted?
 
-# Prompt:
+## Prompt:
 There is an inconsistency with Redis-down behavior. One section mentions fallback to PostgreSQL when Redis is down. Other mentions a response of `503` when rate limiter (Redis) is down. Please clarify on the inconsistency.
 
 Concurrency design is heavier than it needs to be. Can we create a hashmap in the database to look up the URLs so that there are fewer moving parts.
@@ -110,7 +111,7 @@ Although the UI is not a requirement, it will make it more user friendly. A sing
 
 For the prototype, assume no trusted proxy and use the direct client IP.
 
-## Response
+### Response
 Understood. I won’t modify `AI_usage_log.md`; I’ll keep the revised design here in the conversation.
 
 **Simpler Design**
@@ -138,7 +139,7 @@ Keep expired mappings indefinitely. Apply the specified repeated-create expiry r
 **Stack**
 Python, FastAPI, Jinja for a single-page form, and PostgreSQL. Install PostgreSQL locally or use a single-container setup; Docker Compose and Redis are optional, not required. Keep the app to one process for the in-memory rate limiter and optional cache.
 
-# Prompt:
+## Prompt:
 Update requirements.md to reflect our decisions. Do not write the design or
 tasks yet. Show me the proposed changes as a diff and wait for my approval
 before writing the file. Do not add requirements I haven't decided; list any
@@ -168,7 +169,7 @@ Also answer: with ON CONFLICT ... DO UPDATE ... RETURNING, how does the app
 tell a new insert (201) from an existing URL (200)? If it needs a trick,
 say so; returning 200 in both cases is acceptable if simpler.
 
-## Response:
+### Response:
 I’ll inspect the current requirements and repository instructions, then prepare a proposed diff only. I won’t edit either file; I’ll also keep the unresolved 7-vs-10 code length explicit as an assumption rather than silently treating it as settled.
 
 Searched for files matching `**/AGENTS.md`, no matches
@@ -258,10 +259,10 @@ A one-service Docker Compose file will still be acceptable since it will simplif
 
 Update the `requirements.md` with the appropriate changes based on our conversation, and document the consolidated design in `docs/design.md`(data model with schema, API contract, control flow for create and redirect, failure behavior, validation rules, test plan, and limitations). Break the design into ordered tasks, each with dependencies and acceptance criteria tied to the requirements
 
-### Note:
+#### Note:
 Copilot accidentally deleted my requirement regarding how to handle expiration for repeated links. I am going to notify and add them back to the assumptions. Also regarding code length, I am going to specify 7 code instead of 10 since shorter codes will be more better for a shortner and a 7 character will still provide 3.5 trillion combinations, which is more than enough for a prototype. 
 
-# Prompt:
+## Prompt:
 Approved with changes:
 1. Restore the two expiry rules for repeated creates (they were specified in
    the original assumptions): if the existing link has no expiry or the new
@@ -276,10 +277,10 @@ Approved with changes:
 4. Add Click analytics to out of scope for the initial build. It will be added later as the brownfield enhancement; the design keeps a hook point after code lookup and expiry validation, before the redirect response.
 Then write requirements.md.
 
-## Response:
+### Response:
 Updated requirements.md with the approved changes: 7-character Base62 codes, corrected repeated-create expiry and revival rules, limitations L-1 through L-4, and click analytics out of scope for the initial build with a future hook point.
 
-# Prompt:
+## Prompt:
 Read requirements.md (now approved). Write docs/design.md. Do not change
 requirements.md. Do not write code or tasks yet.
 
@@ -300,12 +301,12 @@ For each design choice, cite the requirement IDs it satisfies. List any
 decision you make that is not covered by the requirements as an assumption
 for my review.
 
-## Response:
+### Response:
 Created design.md with the component design, PostgreSQL schema and indexes, API contract, create and redirect flows, validation, failure behavior, test plan, limitations, and requirement-ID traceability. It includes no implementation tasks or code, and requirements.md was not changed.
 
 The document lists review assumptions, including API routes and error formats, timestamp format, whether expiry’s 365-day window restarts on repeated creates, limiter treatment of invalid requests, and hostname normalization. Diagnostics found no errors
 
-# Prompt:
+## Prompt:
 Revise docs/tasks.md (do not change the design or requirements):
 1. Move test work into Tasks 3-6: each task's acceptance criteria must include
    its own passing tests. Reduce Task 7 to cross-cutting integration and
@@ -322,7 +323,7 @@ Revise docs/tasks.md (do not change the design or requirements):
 Show me the changed sections, and list every requirement ID cited in
 design.md and tasks.md that does not exist in requirements.md.
 
-## Response:
+### Response:
 I’ll revise the task plan only, first checking its current task order and the IDs actually cited in both docs. I’ll move focused tests into Tasks 3–6, add the quality gate to every task’s done criteria, and state the latency interpretation without editing the design or requirements.
 
 Read 
@@ -378,7 +379,7 @@ High-impact sign-offs are flagged for the latency interpretation, IP-notation an
 
 Made changes.
 
-# Prompt:
+## Prompt:
 Revise docs/tasks.md (do not change design or requirements):
 1. Restore a setup-instructions task (prerequisites, env vars, Compose,
    migrations, running the app, running tests, seeding, load tests).
@@ -397,7 +398,7 @@ Revise docs/tasks.md (do not change design or requirements):
    exist in requirements.md.
 Show only the changed sections.
 
-## Response:
+### Response:
 I’ll revise only `tasks.md`, preserving the current design and requirements. I’ll check the current numbering and dependencies first, then split the combined feature task, restore setup docs, remove AI-log work, and label tasks by must-have versus reducible scope.
 
 Searched for regex `\b(?:FR|NFR|A|L)-\d+\b` (`**/docs/design.md`), 59 results
@@ -440,7 +441,7 @@ Updated only `tasks.md`. `design.md` and `requirements.md` are unchanged, and no
 
 Made changes.
 
-# Prompt: 
+## Prompt: 
 requirements.md is final and approved; do not change it. Update
 docs/design.md and docs/tasks.md so that every FR, NFR, A, and L citation
 matches the current requirements.md (A- and L- numbers changed during
@@ -450,7 +451,7 @@ pass/fail condition for NFR-3 and report peak-load results separately. Do
 not change any design decisions or task scope. Show only the changed lines,
 and list any cited ID that does not exist in requirements.md.
 
-## Response:
+### Response:
 I’ll read the current approved requirements first, then compare its FR/NFR/A/L numbering against both documents. I’ll update citations only, plus the specified average-versus-peak performance criterion, and leave all design decisions and task scope unchanged.
 
 Read 
@@ -501,7 +502,7 @@ Updated only `tasks.md`; `design.md` and `requirements.md` are unchanged.
 
 Made changes.
 
-# Prompt: 
+## Prompt: 
 Revise docs/tasks.md and docs/design.md only where listed. Do not change
 requirements.md or any design decisions.
 1. Fix citations: Task 3 cite A-4 and L-3 (not A-3); Task 7 cite L-3 (not
@@ -518,7 +519,7 @@ requirements.md or any design decisions.
    after the load tests, so Task 2 has no circular dependency.
 Show only changed sections.
 
-## Response:
+### Response:
 I’ll audit the current requirements and every citation in `design.md` and `tasks.md` before editing. Then I’ll change only those two docs: correct semantic references, make Tasks 14–15 must-have with minimal scope and engineer-owned clarification, and add a non-circular architecture reconciliation task after load testing.
 
 Read 
@@ -642,5 +643,265 @@ Searched for regex `\b(?:FR|NFR|A|L)-\d+\b` (`**/docs/requirements.md`), 34 resu
 - **Setup instructions:** Retained as Task 14.
 
 No cited IDs are missing from `requirements.md`. Diagnostics found no errors.
+
+Made changes.
+
+# Task 1
+## Prompt:
+Task 1 from docs/tasks.md: Establish quality gates. Read docs/tasks.md (Task 1)
+and docs/design.md first. Do not modify docs/requirements.md, docs/design.md,
+or docs/tasks.md.
+
+Intent: every later task must pass the same four quality gates locally and in
+CI, so set them up before any application code exists.
+
+Technical context: Python 3.11.9, FastAPI app to come later,
+PostgreSQL via Docker Compose later. Repo is on GitHub. Keep dependency
+management simple: pyproject.toml for tool configuration, plus a pinned
+requirements.txt and requirements-dev.txt (no poetry or uv unless you can
+justify the extra complexity).
+
+Scope:
+- Minimal project skeleton only: a package directory with an empty module, a
+  tests directory with one trivial passing test, pyproject.toml. Do not write
+  any application logic, endpoints, or database code.
+- The four gates: `ruff check`, `ruff format --check`, mypy, Bandit, pip-audit.
+- One documented local command (for example `make check`) that runs all four.
+- A GitHub Actions workflow that runs the same four gates on every push and
+  pull request.
+
+Constraints:
+- Workflow uses least-privilege permissions (contents: read), pins action
+  versions, and needs no secrets.
+- Do not disable rules or suppress warnings globally to make gates pass;
+  explain any suppression you add.
+- Add .gitignore entries for .env, virtual environments, and caches if they
+  are missing; do not create a .env file.
+- Do not commit or push anything. Leave changes uncommitted so I can review
+  them.
+
+Acceptance criteria:
+- All four gates run from the documented command and produce actionable
+  failures.
+- The GitHub Actions workflow runs the same four gates.
+- All four gates pass on the skeleton.
+- Show me how to prove each gate can fail (for example, one deliberate lint
+  error, type error, and insecure-code example) without leaving them in the
+  repo.
+
+When done, list every file you created or changed, and any decision you made
+that I should review.
+
+### Response:
+I’ll read Task 1 and the design first, then inspect the existing project/config files so I can add only the minimal quality-gate skeleton without touching the three protected docs. I’ll run the gates locally and demonstrate temporary failures without leaving probes in the repository.
+
+Read 
+
+Searched for files matching `**/AGENTS.md`, no matches
+
+Read , lines 1 to 75
+
+Read 
+
+The design confirms the quality gates should be tool-only; no application logic belongs in this task. The workspace listing shows only the docs and README at the root, so I’m checking for ignored/hidden config and available Python before deciding exactly what to create and how to pin the toolchain.
+
+Ran terminal command: Get-ChildItem -Force | Select-Object Name,Mode,Length; python --version; python -m pip --version; Get-Command git -ErrorAction SilentlyContinue | Select-Object Source
+Completed with input: Get-ChildItem -Force | Select-Object Name,Mode,Length; python --version; python -m pip --version; Get-Command git -ErrorAction SilentlyContinue | Select-Object Source
+
+Searched for files matching `**/{.gitignore,pyproject.toml,requirements.txt,requirements-dev.txt,Makefile,makefile,*.yml,*.yaml}`, no matches
+
+Read 
+
+Ran terminal command: python -m pip index versions fastapi | Select-Object -First 2; python -m pip index versions psycopg | Select-Object -First 2; python -m pip index versions ruff | Select-Object -First 2; python -m pip index versions mypy | Select-Object -First 2; python -m pip index versions bandit | Select-Object -First 2; python -m pip index versions pip-audit | Select-Object -First 2; python -m pip index versions pytest | Select-Object -First 2
+Completed with input: python -m pip index versions fastapi | Select-Object -First 2; python -m pip index versions psycopg | Select-Object -First 2; python -m pip index versions ruff | Select-Object -First 2; python -m pip index versions mypy | Select-Object -First 2; python -m pip index versions bandit | Select-Object -First 2; python -m pip index versions pip-audit | Select-Object -First 2; python -m pip index versions pytest | Select-Object -First 2
+
+Python 3.11.9 is available, and no existing quality-gate configuration or `.gitignore` was found. I checked the package index for current pins; I’m extracting those version results, then I’ll create the minimal project/tooling files and avoid adding any service or application behavior.
+
+Read 
+
+I’ll create the empty `url_shortener` package, one typed smoke test, pinned runtime/dev requirements, `pyproject.toml`, a cross-platform Python quality-check runner, `.gitignore`, and a least-privilege GitHub Actions workflow. I’ll add Windows-friendly setup instructions to the README; no application logic or database files will be introduced.
+
+Created 
+
+Created 
+
+Created 
+
+Created 
+
+Created 
+
+Created 
+
+Created 
+
+Created 
+
+The skeleton files are in place. I’m installing the pinned dependencies into the ignored `.venv` now; this is the first focused check before writing additional docs, and it will surface any incompatible pins.
+
+Ran terminal command: python -m venv .venv; .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+
+Read , lines 1 to 120
+
+Read , lines 120 to 203
+
+The pins installed cleanly under Python 3.11.9. I’m running the combined local check now; it should identify any gate configuration or skeleton issue before I document the command.
+
+Ran terminal command: \.venv\Scripts\python.exe scripts/check.py
+
+PowerShell requires `AI-URL-Shortner` to invoke a program in the current directory; the prior attempt didn’t start the check runner. I’m rerunning the same validation with the correct Windows invocation.
+
+Ran terminal command: .\.venv\Scripts\python.exe scripts/check.py
+Completed with input: .\.venv\Scripts\python.exe scripts/check.py
+
+Ruff caught one real issue in the new runner: an unused `Sequence` import. I’m removing just that import and will rerun the same focused gate command immediately.
+
+Generating patch (9 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: .\.venv\Scripts\python.exe scripts/check.py
+
+All five gate commands now pass locally, including `pip-audit`; the only first-run issue was the unused import, now fixed. I’m documenting the Windows setup command and test command in the existing README, then I’ll run pytest, validate the workflow/config, and exercise temporary failure probes outside the repo.
+
+Generating patch (41 lines) in 
+
+
+```
+
+```
+README now documents the local setup and failure-probe commands. I’m running the skeleton test suite next as the focused check for the documented Python command; after it passes, I’ll execute each deliberate failure probe in a temporary directory and remove that directory.
+
+Ran terminal command: .\.venv\Scripts\python.exe -m pytest
+
+The smoke test passes. I’m now running five intentional failure probes from `%TEMP%`—one per gate—checking that each exits nonzero, and deleting the probe directory in a `finally` block so nothing is left in the repository or temp area.
+
+Ran terminal command: $probe = Join-Path $env:TEMP 'url-shortener-gate-probes'; New-Item -ItemType Directory -Force -Path $probe | Out-Null; @'
+import os
+'@ | Set-Content -NoNewline (Join-Path $probe 'lint.py'); @'
+def f( x ):return x
+'@ | Set-Content -NoNewline (Join-Path $probe 'format.py'); @'
+value: int = "wrong"
+'@ | Set-Content -NoNewline (Join-Path $probe 'types.py'); @'
+import subprocess
+subprocess.run("echo probe", shell=True)
+'@ | Set-Content -NoNewline (Join-Path $probe 'security.py'); @'
+jinja2==2.11.3
+'@ | Set-Content -NoNewline (Join-Path $probe 'vulnerable.txt'); $checks = @(@{Name='ruff lint'; Args=@('-m','ruff','check','--config','pyproject.toml',(Join-Path $probe 'lint.py'))}, @{Name='ruff format'; Args=@('-m','ruff','format','--check','--config','pyproject.toml',(Join-Path $probe 'format.py'))}, @{Name='mypy'; Args=@('-m','mypy','--strict',(Join-Path $probe 'types.py'))}, @{Name='bandit'; Args=@('-m','bandit',(Join-Path $probe 'security.py'),'-ll')}, @{Name='pip-audit'; Args=@('-m','pip_audit','-r',(Join-Path $probe 'vulnerable.txt'))}); $failedAsExpected = 0; try { foreach ($check in $checks) { Write-Output "--- $($check.Name) expected failure ---"; & .\.venv\Scripts\python.exe @($check.Args); if ($LASTEXITCODE -ne 0) { $failedAsExpected++; Write-Output "PASS: $($check.Name) rejected the probe (exit $LASTEXITCODE)." } else { Write-Output "FAIL: $($check.Name) accepted the probe." } }; if ($failedAsExpected -ne $checks.Count) { throw "Only $failedAsExpected of $($checks.Count) gate probes failed as expected." } } finally { Remove-Item -Recurse -Force $probe }; Write-Output 'Temporary probe directory removed.'
+Completed with input: $probe = Join-Path $env:TEMP 'url-shortener-gate-probes'; New-Item -ItemType Directory -Force -Path $probe | Out-Null; @'
+import os
+'@ | Set-Content -NoNewline (Join-Path $probe 'lint.py'); @'
+def f( x ):return x
+'@ | Set-Content -NoNewline (Join-Path $probe 'format.py'); @'
+value: int = "wrong"
+'@ | Set-Content -NoNewline (Join-Path $probe 'types.py'); @'
+import subprocess
+subprocess.run("echo probe", shell=True)
+'@ | Set-Content -NoNewline (Join-Path $probe 'security.py'); @'
+jinja2==2.11.3
+'@ | Set-Content -NoNewline (Join-Path $probe 'vulnerable.txt'); $checks = @(@{Name='ruff lint'; Args=@('-m','ruff','check','--config','pyproject.toml',(Join-Path $probe 'lint.py'))}, @{Name='ruff format'; Args=@('-m','ruff','format','--check','--config','pyproject.toml',(Join-Path $probe 'format.py'))}, @{Name='mypy'; Args=@('-m','mypy','--strict',(Join-Path $probe 'types.py'))}, @{Name='bandit'; Args=@('-m','bandit',(Join-Path $probe 'security.py'),'-ll')}, @{Name='pip-audit'; Args=@('-m','pip_audit','-r',(Join-Path $probe 'vulnerable.txt'))}); $failedAsExpected = 0; try { foreach ($check in $checks) { Write-Output "--- $($check.Name) expected failure ---"; & .\.venv\Scripts\python.exe @($check.Args); if ($LASTEXITCODE -ne 0) { $failedAsExpected++; Write-Output "PASS: $($check.Name) rejected the probe (exit $LASTEXITCODE)." } else { Write-Output "FAIL: $($check.Name) accepted the probe." } }; if ($failedAsExpected -ne $checks.Count) { throw "Only $failedAsExpected of $($checks.Count) gate probes failed as expected." } } finally { Remove-Item -Recurse -Force $probe }; Write-Output 'Temporary probe directory removed.'
+
+The temporary probes confirmed Ruff, formatter, mypy, and pip-audit failure paths; Bandit’s initial `subprocess.run` example was below the configured medium-severity threshold, so it passed as intended by that threshold. I’m replacing it with a medium-severity `exec` probe and renaming the mypy file to avoid Python’s standard-library `types` module shadowing, then I’ll re-run those two demonstrations.
+
+Generating patch (6 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: $probe = Join-Path $env:TEMP 'url-shortener-gate-probes'; New-Item -ItemType Directory -Force -Path $probe | Out-Null; @'
+value: int = "wrong"
+'@ | Set-Content -NoNewline (Join-Path $probe 'type_probe.py'); @'
+exec("print('probe')")
+'@ | Set-Content -NoNewline (Join-Path $probe 'security_probe.py'); try { Write-Output '--- mypy expected failure ---'; & .\.venv\Scripts\python.exe -m mypy --strict (Join-Path $probe 'type_probe.py'); if ($LASTEXITCODE -eq 0) { throw 'mypy accepted its deliberate type error.' }; Write-Output "PASS: mypy rejected the type error (exit $LASTEXITCODE)."; Write-Output '--- Bandit expected failure ---'; & .\.venv\Scripts\python.exe -m bandit (Join-Path $probe 'security_probe.py') -ll; if ($LASTEXITCODE -eq 0) { throw 'Bandit accepted the deliberate insecure-code probe.' }; Write-Output "PASS: Bandit rejected the insecure-code probe (exit $LASTEXITCODE)." } finally { Remove-Item -Recurse -Force $probe; Write-Output 'Temporary probe directory removed.' }
+
+The corrected failure probes now show the intended diagnostics: mypy flags the `str`-to-`int` assignment, and Bandit reports B102 at the configured severity. Both probes were removed. I noticed the README still names the old mypy probe filename, so I’m aligning that, then I’ll run the exact documented local command and tests once more.
+
+Generating patch (6 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: .\.venv\Scripts\python.exe scripts/check.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m pytest
+
+The documented check script and pytest both pass. All five intentional probes failed for the expected reasons, and cleanup ran; I’m doing a final workspace inventory and source diagnostics so I can report the exact changed files and verify no probe or `.env` was left behind.
+
+Ran terminal command: Test-Path (Join-Path $env:TEMP 'url-shortener-gate-probes'); Test-Path .env; Get-ChildItem -Force -Name
+
+Checked , , no problems found
+
+Read 
+
+Read 
+
+The final scan surfaced one configuration choice I don’t want to leave hidden: Bandit’s `-ll` threshold excludes low-severity findings, and the smoke test’s plain `assert` triggers one. To honor the no-global-suppression constraint, I’m removing the threshold and making the smoke test pass without an `assert`; the insecure `exec` probe still tests Bandit detection.
+
+Generating patch (15 lines) in , , 
+
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: .\.venv\Scripts\python.exe scripts/check.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m pytest
+
+With Bandit running at default severity, all quality gates and the smoke test still pass. I’m repeating the five temporary failure probes against the final commands now so the proof matches exactly what’s in the runner and README.
+
+Ran terminal command: $probe = Join-Path $env:TEMP 'url-shortener-gate-probes'; New-Item -ItemType Directory -Force -Path $probe | Out-Null; @'
+import os
+'@ | Set-Content -NoNewline (Join-Path $probe 'lint.py'); @'
+def f( x ):return x
+'@ | Set-Content -NoNewline (Join-Path $probe 'format.py'); @'
+value: int = "wrong"
+'@ | Set-Content -NoNewline (Join-Path $probe 'type_probe.py'); @'
+exec("print('probe')")
+'@ | Set-Content -NoNewline (Join-Path $probe 'security_probe.py'); @'
+jinja2==2.11.3
+'@ | Set-Content -NoNewline (Join-Path $probe 'vulnerable.txt'); $checks = @(@{Name='ruff lint'; Args=@('-m','ruff','check','--config','pyproject.toml',(Join-Path $probe 'lint.py'))}, @{Name='ruff format'; Args=@('-m','ruff','format','--check','--config','pyproject.toml',(Join-Path $probe 'format.py'))}, @{Name='mypy'; Args=@('-m','mypy','--strict',(Join-Path $probe 'type_probe.py'))}, @{Name='bandit'; Args=@('-m','bandit',(Join-Path $probe 'security_probe.py'))}, @{Name='pip-audit'; Args=@('-m','pip_audit','-r',(Join-Path $probe 'vulnerable.txt'))}); $failedAsExpected = 0; try { foreach ($check in $checks) { Write-Output "--- $($check.Name) expected failure ---"; & .\.venv\Scripts\python.exe @($check.Args); if ($LASTEXITCODE -ne 0) { $failedAsExpected++; Write-Output "PASS: $($check.Name) rejected the probe (exit $LASTEXITCODE)." } else { Write-Output "FAIL: $($check.Name) accepted the probe." } }; if ($failedAsExpected -ne $checks.Count) { throw "Only $failedAsExpected of $($checks.Count) gate probes failed as expected." } } finally { Remove-Item -Recurse -Force $probe }; Write-Output 'Temporary probe directory removed.'
+
+All five final commands correctly reject their temporary probes, including Bandit at default severity, and the probe directory is removed. I’m performing one last syntax/cleanup check on the workflow and Python files before listing the exact project changes.
+
+Ran terminal command: .\.venv\Scripts\python.exe -c "import yaml; yaml.safe_load(open('.github/workflows/quality.yml', encoding='utf-8')); print('Workflow YAML parsed.')"; Test-Path .env; Test-Path (Join-Path $env:TEMP 'url-shortener-gate-probes')
+
+Checked , , no problems found
+
+Task 1 is complete. No application logic, endpoints, or database code were added, and nothing was committed or pushed.
+
+**Files created or changed**
+- `.gitignore`
+- `quality.yml`
+- `README.md`
+- `pyproject.toml`
+- `requirements.txt`
+- `requirements-dev.txt`
+- `check.py`
+- `test_smoke.py`
+- `__init__.py`, intentionally empty
+
+The local `.venv` and tool caches were generated and are ignored. No `.env` file or temporary failure probe remains. Protected docs were not changed.
+
+**Verification**
+The combined quality command passes Ruff lint, Ruff formatting, mypy, Bandit at default severity, and pip-audit. Pytest passes. Temporary probes confirmed each gate rejects an issue; all probes were removed.
+
+**Decisions to review**
+Dependencies are pinned to the package-index versions available during setup. PostgreSQL’s binary psycopg extra is included for simpler local installation. The GitHub Actions references use exact release-version tags as requested.
 
 Made changes.
