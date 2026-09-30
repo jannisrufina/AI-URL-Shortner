@@ -91,7 +91,7 @@ def test_admits_ten_requests_and_returns_standard_429_body() -> None:
     assert "https://" not in rendered_body
 
 
-def test_window_slides_and_rejected_requests_do_not_extend_it() -> None:
+def test_window_slides_at_sixty_seconds() -> None:
     clock = FakeClock()
     app = _test_app(SlidingWindowRateLimiter(clock=clock))
     request = _request(app)
@@ -101,6 +101,22 @@ def test_window_slides_and_rejected_requests_do_not_extend_it() -> None:
 
     clock.now = 59.0
     assert not _allowed(request)
+    clock.now = 60.0
+    assert _allowed(request)
+
+
+def test_rejected_requests_do_not_extend_the_window() -> None:
+    clock = FakeClock()
+    app = _test_app(SlidingWindowRateLimiter(clock=clock))
+    request = _request(app)
+
+    for _ in range(10):
+        assert _allowed(request)
+
+    clock.now = 30.0
+    for _ in range(10):
+        assert not _allowed(request)
+
     clock.now = 60.0
     assert _allowed(request)
 

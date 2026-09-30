@@ -83,7 +83,9 @@ The 250 ms pool-acquisition wait is an overload/failure bound, not an expected
 redirect wait. The in-process limiter is single-process and resets on restart
 (L-1). Uvicorn runs with `--no-proxy-headers`: forwarded headers are not trusted,
 so when deployed behind a proxy, requests share the proxy's rate-limit bucket
-(L-6). For PostgreSQL integration tests, point at the separate
+(L-6). 
+
+For PostgreSQL integration tests, point at the separate
 disposable database created above:
 
 ```powershell
@@ -91,6 +93,5 @@ $env:TEST_DATABASE_URL = "postgresql://url_shortener:replace-with-a-local-passwo
 python -m pytest -m integration
 ```
 
-CI starts a PostgreSQL service container and supplies `TEST_DATABASE_URL`
-automatically. CI starts a PostgreSQL service container and sets REQUIRE_DB=1, so a missing or unreachable test database fails the run. Local runs without TEST_DATABASE_URL skip the integration tests.
+CI starts a PostgreSQL service container and sets REQUIRE_DB=1, so a missing or unreachable test database fails the run. Local runs without TEST_DATABASE_URL skip the integration tests.
 
