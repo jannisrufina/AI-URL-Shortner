@@ -846,4 +846,70 @@ Made changes.
 
 Task 1 succeeded as expected. The quality gates (Ruff lint and format, mypy, Bandit, pip-audit) and pytest pass locally, and the GitHub Actions workflow ran the same checks on GitHub and passed.
 
-# Task 2
+## Task 2
+### Prompt
+Task 2 from docs/tasks.md: Produce architecture overview. Read docs/tasks.md
+(Task 2), docs/design.md, and docs/requirements.md first. Create only
+docs/architecture.md. Do not modify any other file, write application code,
+or commit/push.
+
+Intent: a compact overview a reviewer can read in a few minutes, consistent
+with the approved design. It will be reconciled with the built code later
+(Task 12), so keep it accurate to the design, not aspirational.
+
+Content:
+- Component overview: FastAPI app, Jinja form, PostgreSQL, one-service Docker
+  Compose, and the in-process rate limiter. State what each does and where the
+  boundaries are (app process vs. database).
+- Create flow and redirect flow as Mermaid diagrams (GitHub renders these),
+  showing: rate limit, validation, database boundary, expiry check, and the
+  click-analytics hook location on the redirect path.
+- A short "key decisions" section (unique digest index with a single
+  INSERT ... ON CONFLICT, no cache initially, 200 for new and reused links,
+  in-process limiter, Alembic migrations), each with the reason and the
+  requirement IDs it serves.
+- A short "known limitations" section pointing at the L- IDs in
+  requirements.md.
+
+Constraints:
+- Introduce no behavior beyond docs/design.md and docs/requirements.md. If you
+  find a gap or contradiction, list it separately for me instead of resolving
+  it silently.
+- Use the requirement IDs exactly as they appear in requirements.md.
+- Keep it under roughly two pages.
+
+Acceptance criteria (from Task 2): identifies FastAPI, Jinja, PostgreSQL and
+the one-service Compose setup; create and redirect flows show the database
+boundary, validation, rate limit, expiry check, and analytics hook; no
+behavior beyond approved docs; all four quality gates pass.
+
+When done, list what you created and any gaps you found.
+
+#### Response:
+I’ll read the current Task 2, approved design, and requirements before drafting, then create only `docs/architecture.md`. I’ll keep it aligned to documented behavior and run the project’s quality gates afterward; any source-document inconsistency will be reported rather than silently decided.
+
+Read , lines 1 to 90
+
+Read 
+
+Read 
+
+The source docs align on the requested architecture: one local FastAPI process, Jinja-rendered form, PostgreSQL as the only external service, in-process limiter, and a future analytics hook that emits nothing initially. I found no blocking contradiction; I’ll now create the compact overview with both Mermaid flows and requirement-linked decision/limitation notes.
+
+Created 
+
+`architecture.md` is created with component boundaries, both Mermaid flows, decision rationales, and all six limitations. I’m running the same four quality gates plus pytest now; no other project file has been edited.
+
+Ran terminal command: .\.venv\Scripts\python.exe scripts/check.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; .\.venv\Scripts\python.exe -m pytest
+
+All four gate categories and pytest pass. I’m doing a final file-level check to confirm only `architecture.md` was created by this task and that there’s no unresolved mismatch among the three source docs.
+
+Ran terminal command: $git = 'C:\Program Files\Git\cmd\git.exe'; & $git status --short -- docs/architecture.md docs/design.md docs/requirements.md docs/tasks.md
+
+Checked , no problems found
+
+Created `architecture.md` only. It includes the component boundaries, create and redirect Mermaid flows, rationale-linked key decisions, and limitations L-1 through L-6. No contradictions or gaps were found in the requested scope.
+
+All quality gates passed, and pytest passed (1 test). No commit or push was made.
+
+Made changes.
