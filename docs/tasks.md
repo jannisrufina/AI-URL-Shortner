@@ -293,7 +293,7 @@ Tasks are ordered by dependency. Each task includes acceptance criteria, focused
 
 **Work:** Produce a concise completion report with implemented scope, requirement traceability, quality/test results, performance measurements, setup guidance, limitations, deviations, and deferred high-impact decisions.
 
-**Dependencies:** Tasks 1–14 and an explicit decision to defer or complete Tasks 15–16.
+**Dependencies:** Tasks 1–16.
 
 **Acceptance criteria:**
 - Summary distinguishes verified outcomes from targets not met or not measured.
