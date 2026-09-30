@@ -2503,3 +2503,199 @@ Scope:
 - Jinja2 with autoescaping ON for every template, no |safe and no Markup of
   user-controlled values. The short URL is shown as text and as a link built
   only from
+
+#### Response:
+The requested form behavior fits the existing app boundary: one async create service can be called by both routes, while request-scoped error handlers can render HTML only for `POST /` and retain JSON for `/api/links`. Before editing, I’m verifying S-3’s exact timestamp wording, dependency lock inputs, and template-directory state; the concrete file list is expanding to include both requirements lock files.
+
+Ran terminal command: git status --short
+
+Searched for text `S-3` (`**/docs/design.md`), 1 result
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read , lines 1 to 100
+
+Final edit list: change `app.py`, `requirements.in`, `requirements.txt`, `requirements-dev.txt`, and `test_database_integration.py`; create url_shortener/templates/index.html and tests/test_form.py. The dev input already contains the prior TestClient dependency, so I won’t change it unless recompilation requires it. I’m checking Starlette’s form-parser error behavior once so malformed bodies can reliably become sanitized HTML 422 responses.
+
+Read , lines 280 to 349
+
+Read 
+
+Read , lines 1 to 170
+
+The form parser’s malformed-body path is now clear: Starlette converts parser failures into `HTTPException(400)`, so the form route can catch that narrowly and render the required fixed 422 page without changing global exception behavior. I’m now adding the shared create service and path-aware HTML rendering; global handlers will branch on `POST /`, while JSON routes continue through the existing JSON handlers, including the rate-limit handler.
+
+Generating patch (6 lines) in 
+
+
+```
+
+```
+
+
+Generating patch (7 lines) in 
+
+
+```
+
+```
+
+
+Generating patch (252 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_create_api.py tests/test_redirects.py -q
+Completed with input: & .\.venv\Scripts\python.exe -m pytest tests/test_create_api.py tests/test_redirects.py -q
+
+The shared-service edit exposed the expected dependency blocker: this virtual environment doesn’t yet have Jinja2, so the API/redirect test modules fail during import rather than exercising behavior. I’m fixing a small handler variable-lifetime issue spotted in the current code, then I’ll compile and install the two permitted runtime dependencies before running the focused tests.
+
+Generating patch (9 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m piptools compile --output-file requirements.txt requirements.in
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m piptools compile --constraint requirements.txt --output-file requirements-dev.txt requirements-dev.in
+
+Both locks now pin only the two requested runtime additions: Jinja2 and python-multipart. I’ll install the updated lock in the workspace venv, then add the template and form/API regression tests; no dev dependency input change was needed.
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
+
+Generating patch (274 lines) in , 
+
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_form.py tests/test_create_api.py -q
+Completed with input: & .\.venv\Scripts\python.exe -m pytest tests/test_form.py tests/test_create_api.py -q
+
+Read , lines 1 to 320
+
+The new tests exposed two concrete issues: parser-failure response behavior needs its assertion tightened to Starlette’s actual malformed multipart handling, and I found the DB error handler still discards `request` before using it to choose HTML versus JSON. I’m inspecting the full first failure and current handler block, then I’ll repair that same slice and rerun the form/API tests.
+
+Read , lines 80 to 165
+
+Read 
+
+Generating patch (24 lines) in , 
+
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_form.py tests/test_create_api.py -q
+
+The shared create path and route-specific error rendering now pass the focused form/API tests (`27 passed`). Validation, expiry, DB, and limiter failures render fixed HTML only for `POST /`; the same global handlers delegate JSON routes back to their existing JSON response path. I’m adding real-PostgreSQL coverage proving form and JSON creation converge on the same persisted code.
+
+Generating patch (38 lines) in , 
+
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_form.py tests/test_database_integration.py -k "form or create_api_persists" -q
+
+The focused tests pass, and the real PostgreSQL convergence test is in place; the local database credential mismatch still prevents executing that integration case here. I’m at final verification now: the full suite will check JSON compatibility alongside the form paths, and the gate script will catch formatting, typing, security, and dependency-audit issues.
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+
+Checked , , , , no problems found
+
+The full run is **165 passed, 17 skipped**; the new integration case accounts for one skip, alongside the existing PostgreSQL cases. Mypy, Bandit, and pip-audit pass; remaining gate failures are import ordering and formatter-only line wrapping. I’m applying those mechanical fixes now, then rerunning both the suite and all gates.
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m ruff check --fix url_shortener/app.py
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m ruff format url_shortener/app.py tests/test_form.py tests/test_database_integration.py
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+
+Ran terminal command: git diff --check
+
+Generating patch (11 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_form.py -q
+
+All form-specific tests pass after the final formatting adjustment (`12 passed`). The complete suite previously passed at **165 passed, 17 skipped**; I’m rerunning the full suite and gate script once more so the reported totals correspond exactly to the final tree.
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+
+Ran terminal command: git status --short
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m ruff format tests/test_form.py
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+
+All four quality gates now pass on the formatted tree, including pip-audit. The last formatter edit changed only the malformed-body test literal layout; I’m running pytest once more and checking whitespace so the final count and file list are exact.
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest -q
+
+Ran terminal command: git diff --check
+
+Checked , , , , no problems found
+
+Implemented the single-page form using one shared create service for `/` and `/api/links`. Form errors render escaped HTML only for `POST /`; the rate-limit handler delegates API requests to its existing JSON handler. All template substitutions use an explicitly autoescaping Jinja environment, and HTML responses carry the requested security headers.
+
+**Files**
+Changed: `app.py`, `requirements.in`, `requirements.txt`, `requirements-dev.txt`, `test_database_integration.py`.
+
+Created: `index.html`, `test_form.py`.
+
+The existing edit to `AI_usage_log.md` was not part of this task and remains untouched.
+
+**Verification**
+The final suite reports **165 passed, 17 skipped: 182 tests total**. The skipped tests require `TEST_DATABASE_URL`, which is not configured here. All four quality gates pass, and `git diff --check` is clean.
+
+The only implementation choice to review is the fixed form error wording; submitted values are retained only in the autoescaped form fields, never in error messages.
+
+Made changes.
+
+##### Note:
+Browser check on 2026-09-30: created a link through the form, followed it (redirected), repeated the same URL and got the same code, invalid URLs showed a fixed error, and a script payload produced no alert and was escaped in the page source.

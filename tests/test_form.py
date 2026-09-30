@@ -187,6 +187,8 @@ def test_success_and_error_pages_escape_submitted_markup(
 
     assert "<script>" not in response.text
     assert "&lt;script&gt;" in response.text
+    assert '"><script>' not in response.text
+    assert "&#34;&gt;&lt;script&gt;" in response.text
 
 
 def test_invalid_form_request_consumes_rate_limit_slot(
@@ -239,3 +241,53 @@ def test_database_failure_renders_sanitized_html_503(
         "secret.example"
         not in response.text.split('role="alert">', 1)[1].split("</p>", 1)[0]
     )
+
+
+def test_json_api_errors_stay_json_after_form_routes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_create(*_args: Any) -> Link:
+        raise DatabasePoolTimeoutError("private database details")
+
+    with _client(monkeypatch) as client:
+        invalid = client.post("/api/links", json={"url": "ftp://bad.test"})
+        malformed = client.post(
+            "/api/links",
+            content=b"not json",
+            headers={"content-type": "application/json"},
+        )
+        monkeypatch.setattr(app_module, "create_or_reuse_link", fail_create)
+        unavailable = client.post("/api/links", json={"url": "https://example.test/"})
+
+    for response, status in ((invalid, 422), (malformed, 422), (unavailable, 503)):
+        assert response.status_code == status
+        assert response.headers["content-type"].startswith("application/json")
+        assert "error" in response.json()
+
+
+def test_file_upload_in_expiry_field_renders_422(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _client(monkeypatch) as client:
+        response = client.post(
+            "/",
+            data={"url": "https://example.test/"},
+            files={"expires_at": ("x.txt", b"not a date", "text/plain")},
+        )
+
+    _assert_html_headers(response)
+    assert response.status_code == 422
+
+
+def test_invalid_utf8_form_body_does_not_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _client(monkeypatch) as client:
+        response = client.post(
+            "/",
+            content=b"url=%FF%FE",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+
+    assert response.status_code in (200, 422)
+    _assert_html_headers(response)
