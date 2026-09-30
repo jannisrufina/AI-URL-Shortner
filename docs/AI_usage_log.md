@@ -8,8 +8,9 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 - **Security practices:** no secrets or credentials in prompts; `.env` is ignored and only placeholder values are committed; the assignment text was shared once with the planning chat (Claude) to understand requirements and was not given to Copilot; every AI change was reviewed, tested, and run through the quality gates before I relied on it.
 - **Stages so far:**
   - Planning: requirements, design, tasks
-  - Tasks 1 to 8: quality gates and CI, architecture overview, app bootstrap, URL validation, create limiter, create API, redirects, create form
-  - Next: Task 9 (integration and end-to-end tests)
+  - Tasks 1 to 9: quality gates and CI, architecture overview, app bootstrap, URL validation, create limiter, create API, redirects, create form, end-to-end tests
+  - Next: Task 10 (performance data seeder)
+  - Still to do: Task 11 (load tests), Task 12 (reconcile the architecture doc), Task 13 (OpenAPI export), Task 14 (setup instructions), Tasks 15 and 16 (the two scenarios), Task 17 (final summary)
 
 ## Decisions (what the AI proposed, what I chose, why)
 
@@ -48,6 +49,9 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | D-31 | Failure mapping (Task 7) | Database errors are not caught in the route; the existing handler returns the sanitized 503 | Accepted | A pool, connection, or statement-timeout failure must never be reported as "not found" |
 | D-32 | Form error handling (Task 8) | Global handlers return HTML only when the request is `POST /` (`_is_form_submission`); every other path keeps JSON | Accepted | The JSON API cannot receive HTML errors; one shared `create_short_link` service serves both paths |
 | D-33 | Form behavior accepted (Task 8) | The form refills the submitted values after an error (autoescaped); no CSRF token; security headers including a restrictive CSP on every HTML response | Accepted | Refilled values are escaped, so no XSS; no accounts or sessions exist (A-9), so there is nothing for CSRF to protect; the CSP is defense in depth |
+| D-34 | How Task 9 found gaps (Task 9) | The AI built a requirement-to-test matrix first, with a strict column for "real HTTP request against PostgreSQL" | Accepted; it then added 10 integration tests for the gaps (combined create, redirect, and form flow; API-set expiry; HTTP rate limiting with forwarded headers; exact-URL identity; URL policy rejections; missing and malformed codes; form escaping) | The matrix is an honest answer to "what is tested end to end", and it feeds the final summary's traceability |
+| D-35 | Test file housekeeping (Task 9) | All integration tests live in `tests/test_database_integration.py` (about 600 lines) | Left as one file | Splitting by concern is cosmetic and not worth deadline time |
+| D-36 | Documented test command (Task 9) | `python -m pytest -m "not performance"` with `REQUIRE_DB=1` | [Kept as is / changed to plain `python -m pytest` until Task 11 registers a performance marker] | `--strict-markers` is on, so a marker has to be registered when performance tests exist |
 
 ## AI errors and gaps I caught
 
@@ -80,6 +84,8 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | E-25 | Task 7: my `try/finally` edit cut the second half off two integration tests (the row-retained check and the whole revival test), leaving one with no assertions | Ruff F841 (unused variable) in `scripts/check.py`, then reading the file | Restored both tests; compared `git diff` to confirm nothing else was lost |
 | E-26 | Task 7: the AI could not run the 16 PostgreSQL integration tests (container credentials did not match), so its report said 153 passed and 16 skipped, with three new integration tests unrun | The AI's own report; I treated the skips as unverified | I ran them against my test database twice: [count] passed; confirmed create then redirect, expired-row retention, and revival work against real PostgreSQL |
 | E-27 | Task 8: the form tests had no check that the JSON API still returns JSON after the form changed the global handlers (the main risk), and the XSS test did not check that a quote cannot close an attribute | Second-AI review of the test file | Added a JSON-stays-JSON test and stricter XSS assertions (my edits), plus file-upload and invalid-bytes tests |
+| E-28 | Task 9: the AI wrote 10 new integration tests but could not run any of them (27 skipped; no database in its shell), so its report could not show that they pass. Third time the same limit appeared (E-12, E-26) | The AI's own report; I treated the skips as unverified | I ran them against my test database with `REQUIRE_DB=1`, twice: 195 passed, 0 skipped; CI [green, run number] |
+| E-29 | Task 9: the log-capture test only sees Python application logging, so it cannot show Uvicorn's own access log is clean | Second-AI review of the test | Recorded as a limit: the access log records request paths (short codes) and not request bodies; no change to the test |
 
 ## Planning
 ### Prompt: 
