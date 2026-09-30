@@ -5,8 +5,8 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 ## Summary
 
 - **Tools:** GitHub Copilot in VS Code (requirements, design, tasks, code generation); Claude in a separate chat (planning guidance, reviewing Copilot's outputs, drafting and refining prompts). I made every decision; neither tool committed or pushed anything.
-- **Security practices:** private repository; no secrets, credentials, or assignment source documents in prompts; `.env` ignored; every AI change reviewed as a diff before commit.
-- - **Stages so far:** Planning (requirements, design, tasks) | Task 1 (quality gates and CI) | Task 2 (architecture overview) | Task 3 (app bootstrap, schema, pool) | Task 4 (next)
+- **Security practices:** no secrets or credentials in prompts; `.env` is ignored and only placeholder values are committed; the assignment text was shared once with the planning chat (Claude) to understand requirements and was not given to Copilot; every AI change was reviewed, tested, and run through the quality gates before I relied on it.
+- **Stages so far:** Planning (requirements, design, tasks) | Task 1 (quality gates and CI) | Task 2 (architecture overview) | Task 3 (app bootstrap, schema, pool) | Task 4 (URL validation) | Task 5 (next)
 
 ## Decisions (what the AI proposed, what I chose, why)
 
@@ -29,6 +29,8 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | D-15 | Architecture doc gaps (Task 2) | Overview reported "no contradictions or gaps" | Accepted the draft as generated; small fixes deferred to Task 12 (reconcile with built code) | Moving fast; the doc gets rewritten against the real code anyway |
 | D-16 | Where DB tests run (Task 3) | AI could only run offline checks (Docker missing) and left 5 integration tests skipped | Installed Docker Desktop (ARM64 build) and ran the tests against a real PostgreSQL | Compose is a required deliverable (NFR-6) and the migration, indexes, and pool behavior needed real verification |
 | D-17 | Test database and defaults (Task 3) | Separate `url_shortener_test` database; `DB_*` setting names; `postgres:16-alpine` image | Accepted as proposed | Tests must not touch application data; defaults match the design |
+| D-18 | Hostname strictness (Task 4) | `urlsplit` parsing with equality and IP-form checks | Add an ASCII hostname allowlist (punycode allowed), reject backslashes, and reject a non-ASCII authority | Browsers and Python parse these inputs differently; an allowlist closes the whole class instead of chasing individual characters |
+| D-19 | Accepted gaps (Task 4) | Explicit `ipaddress` flags (`is_private`, `is_loopback`, `is_link_local`, `is_unspecified`) | Accept L-5 (alternate IPv4 spellings), the CGNAT (`100.64.0.0/10`) and multicast ranges, and numeric shorthand hosts (`127.1`, `0`); known fix deferred: reject hostnames whose last label is all digits or starts with `0x`; internationalized hosts must be submitted as punycode | Deadline; the gaps are characterized in tests and documented, and the fix touches five tests and four documents |
 
 ## AI errors and gaps I caught
 
@@ -48,6 +50,8 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | E-12 | Task 3: five integration tests skipped locally because Docker was not installed, so the migration, constraints, and pool behavior were unverified | AI's own report, then my review | Installed Docker Desktop (ARM64 build); ran the integration tests locally against a real PostgreSQL: 5 passed. CI (Actions run 7) also ran them: 19 passed, 0 skipped |
 | E-13 | Task 3: integration tests skip when `TEST_DATABASE_URL` is missing, so CI could pass without running them | Second-AI review | Added REQUIRE_DB; verified it fails locally without a database; CI passed. |
 | E-14 | Task 3: tests errored with "database url_shortener_test does not exist"; Compose creates only the main database | Running the integration tests | Created the test database with `createdb`. Kept it as a documented manual setup step (in the README and Task 14 setup instructions) instead of automating it: it is a one-time command, and CI's PostgreSQL service creates the test database itself |
+| E-15 | Task 4: validator accepted parser-differential inputs (`http://jrb.sh\path`, `http://127%2E0%2E0%2E1/`, fullwidth `ｊｒｂ.ｓｈ`), so `127.0.0.1` and the shortener's own host passed the FR-5/FR-6 checks; the 46 tests did not cover them | Second-AI review of the tests and code, confirmed by running the inputs myself (all five ACCEPTED) | Follow-up prompt: reject backslashes, add a hostname allowlist, add tests for every input; all five now REJECTED |
+| E-16 | Task 4: after the follow-up, a Kelvin sign (`\u212a`) still passed the ASCII allowlist because Python lowercases it to `k` | Second-AI review; the new test failed before the fix (78 passed, 1 failed) | Added a `parsed.netloc.isascii()` check (my edit); the test now passes (79 passed) |
 
 ## Planning
 ### Prompt: 
