@@ -411,3 +411,18 @@ def test_repeat_create_revives_expired_redirect(database_url: str) -> None:
     assert recreated.json()["code"] == expired.code
     assert after_revival.status_code == 302
     assert after_revival.headers["location"] == submitted_url
+
+
+def test_form_and_json_api_reuse_the_same_persisted_code(
+    database_url: str,
+) -> None:
+    settings = _base_settings(database_url)
+    submitted_url = f"https://example.test/shared-create/{uuid4().hex}"
+    with TestClient(create_app(settings)) as client:
+        api_response = client.post("/api/links", json={"url": submitted_url})
+        form_response = client.post("/", data={"url": submitted_url})
+
+    assert api_response.status_code == 200
+    assert form_response.status_code == 200
+    assert api_response.json()["code"] in form_response.text
+    assert api_response.json()["short_url"] in form_response.text

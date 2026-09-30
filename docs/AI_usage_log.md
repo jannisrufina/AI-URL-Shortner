@@ -6,7 +6,7 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 
 - **Tools:** GitHub Copilot in VS Code (requirements, design, tasks, code generation); Claude in a separate chat (planning guidance, reviewing Copilot's outputs, drafting and refining prompts). I made every decision; neither tool committed or pushed anything.
 - **Security practices:** no secrets or credentials in prompts; `.env` is ignored and only placeholder values are committed; the assignment text was shared once with the planning chat (Claude) to understand requirements and was not given to Copilot; every AI change was reviewed, tested, and run through the quality gates before I relied on it.
-- **Stages so far:** Planning (requirements, design, tasks) | Task 1 (quality gates and CI) | Task 2 (architecture overview) | Task 3 (app bootstrap, schema, pool) | Task 4 (URL validation) | Task 5 (in-process create limiter) | Task 6 (create persistence and JSON API) | Task 7 (next)
+- **Stages so far:** Planning (requirements, design, tasks) | Task 1 (quality gates and CI) | Task 2 (architecture overview) | Task 3 (app bootstrap, schema, pool) | Task 4 (URL validation) | Task 5 (in-process create limiter) | Task 6 (create persistence and JSON API) | Task 7 (redirects and failure handling) | Task 8 (next)
 
 ## Decisions (what the AI proposed, what I chose, why)
 
@@ -40,6 +40,9 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | D-26 | Lone surrogates in URLs (Task 6) | `validate_url` only rejected whitespace and `Cc` characters | Reject Unicode category `Cs` too (my edit to a Task 4 file) | Hashing the URL to UTF-8 raised `UnicodeEncodeError` (E-23) |
 | D-27 | Accepted gaps (Task 6) | No request body size limit; `expires_at` in responses is whatever timezone the database returns | Accepted for the prototype | Legitimate bodies are small and the Docker database runs in UTC; a reverse proxy would normally cap bodies |
 | D-28 | Test client deprecation warning (Task 6) | Starlette's `TestClient` with `httpx` is deprecated in favor of a newer package | Left as is | Dependencies are pinned, tests pass, the application does not use the test client; revisit when upgrading Starlette or FastAPI |
+| D-29 | Redirect route shape (Task 7) | `GET /{code:path}` with a seven-character Base62 check before any database access | Accepted | Encoded traversal such as `/..%2Fetc` gets the standard JSON 404 instead of FastAPI's default body; side effect: every unknown GET path (including `GET /api/links`) returns the JSON 404, so `GET /` must be registered before this route |
+| D-30 | Testability seams (Task 7) | A small `_utc_now()` function and a no-op `record_click(link)` hook instead of patching `datetime` | Accepted | Patching the `datetime` class broke FastAPI's type inspection; the hook marks where click analytics will go (brownfield scenario) |
+| D-31 | Failure mapping (Task 7) | Database errors are not caught in the route; the existing handler returns the sanitized 503 | Accepted | A pool, connection, or statement-timeout failure must never be reported as "not found" |
 
 ## AI errors and gaps I caught
 
@@ -69,6 +72,8 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | E-22 | Task 6: malformed-JSON handling caught only `ValueError`, so deeply nested JSON would raise `RecursionError` and return a 500 instead of the standard 422 | Second-AI review of `app.py` | Catch `(ValueError, RecursionError)` and add a test (my edit) |
 | E-23 | Tasks 4 and 6: a URL containing a lone surrogate passed `validate_url`, then failed at UTF-8 encoding for the digest and would return a 500 | Second-AI review of `links.py` against `validation.py`; reproduced with a one-line script (`UnicodeEncodeError`); four new validation tests failed before the fix (4 failed, 79 passed) | Reject category `Cs` in `validate_url`; validation and API tests added (my edits, D-26) |
 | E-24 | Task 6: I pushed my review edits without rerunning the quality gates; CI failed Ruff lint and format (import order, stray whitespace) | CI run [number] | `ruff check --fix` and `ruff format`, reran all gates, pushed; CI green [number]. I now run `scripts/check.py` before every push |
+| E-25 | Task 7: my `try/finally` edit cut the second half off two integration tests (the row-retained check and the whole revival test), leaving one with no assertions | Ruff F841 (unused variable) in `scripts/check.py`, then reading the file | Restored both tests; compared `git diff` to confirm nothing else was lost |
+| E-26 | Task 7: the AI could not run the 16 PostgreSQL integration tests (container credentials did not match), so its report said 153 passed and 16 skipped, with three new integration tests unrun | The AI's own report; I treated the skips as unverified | I ran them against my test database twice: [count] passed; confirmed create then redirect, expired-row retention, and revival work against real PostgreSQL |
 
 ## Planning
 ### Prompt: 
@@ -2459,3 +2464,42 @@ content-length: 68
 content-type: application/json
 
 {"error":{"code":"not_found","message":"Short link was not found."}}
+
+## Task 8:
+### Prompt:
+This is a NEW task: Task 8. Tasks 1 through 7 are already committed. Do not
+summarize earlier tasks. Before writing any code, reply with the list of files
+you will create or change, then proceed.
+
+Task 8 from docs/tasks.md: Implement the single-page create form. Read
+docs/tasks.md (Task 8), docs/design.md (Create form, Errors, Validation
+Rules, assumption S-3), and docs/requirements.md (FR-3 to FR-7, FR-10, FR-11,
+FR-12, NFR-1, NFR-2, A-2, L-4), then url_shortener/app.py, links.py,
+expiry.py, validation.py, rate_limiter.py. Do not modify anything in docs/,
+validation.py, rate_limiter.py, expiry.py, or the schema. Do not commit or
+push.
+
+Scope:
+- GET / renders one page with a form: a "url" text input and an optional
+  "expires_at" text input labeled with the RFC 3339 format and an example
+  (per S-3 the form submits the same format as the JSON API; do NOT use
+  datetime-local, which has no timezone). POST / creates or reuses the link
+  and renders the same page with the short URL.
+- Register GET / and POST / BEFORE the existing GET /{code:path} route (that
+  route would otherwise claim "/"). Keep the comment about fixed routes.
+- Share ONE service function with POST /api/links for validation order,
+  expiry parsing, persistence, and short-URL construction; do not duplicate
+  the logic. The JSON API's behavior and all existing tests must stay
+  unchanged.
+- POST / consumes a rate-limit slot before validation, like the JSON route.
+- Errors on the form path render the page (HTML) with an escaped, fixed
+  message and the same status codes as the JSON API (422, 429, 503). JSON
+  responses stay JSON. Explain how you kept the global JSON handlers
+  (RequestValidationError, URLValidationError, ExpiryValidationError,
+  DatabaseAccessError, CodeGenerationExhaustedError, the 429 handler) from
+  returning JSON to the form. Error messages never include the submitted URL;
+  re-filling the input box with the submitted value is allowed only through
+  Jinja autoescaping.
+- Jinja2 with autoescaping ON for every template, no |safe and no Markup of
+  user-controlled values. The short URL is shown as text and as a link built
+  only from

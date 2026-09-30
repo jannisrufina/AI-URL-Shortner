@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Short link</title>
+  </head>
+  <body>
+    <main>
+      <h1>Create a short link</h1>
+      {% if error_message %}
+      <p role="alert">{{ error_message }}</p>
+      {% endif %}
+      {% if short_url %}
+      <p>Your short link: <a href="{{ short_url }}">{{ short_url }}</a></p>
+      {% endif %}
+      <form action="/" method="post">
+        <p>
+          <label for="url">URL</label>
+          <input id="url" name="url" type="text" value="{{ url }}" required>
+        </p>
+        <p>
+          <label for="expires_at">Expiry (optional, RFC 3339 with timezone)</label>
+          <input
+            id="expires_at"
+            name="expires_at"
+            type="text"
+            value="{{ expires_at }}"
+            aria-describedby="expiry-example"
+          >
+          <span id="expiry-example">Example: 2026-10-01T12:00:00Z</span>
+        </p>
+        <button type="submit">Create short link</button>
+      </form>
+    </main>
+  </body>
+</html>
