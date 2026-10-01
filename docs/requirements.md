@@ -21,7 +21,7 @@ NFR-4: Meet a server-side p99 create latency below 300 ms, measured under the ex
 NFR-5: Support 10 million stored links with fast lookup by short code.
 NFR-6: Use PostgreSQL as the only external service. Provide a one-service Docker Compose configuration for PostgreSQL; do not use Redis.
 NFR-7: Enforce repeated-URL uniqueness using a unique index on the SHA-256 digest of the exact URL string. Do not perform a separate full-URL comparison.
-NFR-8: Click analytics must not regress the engineer-measured redirect-average result beyond the Task 15 baseline threshold recorded in AI_usage_log.md D-57: p99 at or below 77.8 ms, all responses 302, zero errors, and not generator-limited. The engineer runs this measurement; the AI does not.
+NFR-8: Click analytics must not regress redirect latency. The engineer (not the AI) measures it with the `redirect-average` profile at 25 requests/second for 30 seconds against the 1,000,000-row benchmark database, one worker, pool 10/250 ms, using the same machine and command as the pre-change baseline (p99 51.8 ms; AI_usage_log.md D-56). Required result: all responses 302, zero errors, not generator-limited, p99 at or below 77.8 ms (D-57).
 # Assumptions:
 A-1: Repeated URLs are defined by exact string equality; comparison is case-sensitive.
 A-2: On a repeated create, if the existing link has no expiry or the new request provides none, the resulting link has no expiry; otherwise the new expiry replaces the existing one.
@@ -40,7 +40,7 @@ L-3: Expired mappings are retained indefinitely, so database storage grows over 
 L-4: A user can make an expiring link permanent by resubmitting the same URL without an expiry, as specified by A-2.
 L-5: Alternate decimal, hexadecimal, and octal IPv4 host spellings (for example 2130706433, 0x7f000001, 0177.0.0.1) are not normalized and may bypass literal-IP classification.
 L-6: If the service is deployed behind a proxy, all requests appear to come from the proxy's IP and share a single rate-limit bucket, because forwarded headers are not trusted.
-L-7: Click events are best-effort and can be lost when persistence fails; there is no deduplication or bot filtering, and the append-only table grows without a retention policy.
+L-7: Click events are best-effort and can be lost when persistence fails; there is no deduplication or bot filtering, and the append-only table grows without a retention policy. A failing or slow click write can delay the redirect by up to the 250 ms pool-acquisition wait or the 1 s statement timeout before the 302 is returned.
 
 # Out of scope:
 - Malicious URL detection, such as Safe Browsing.

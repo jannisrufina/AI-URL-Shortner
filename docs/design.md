@@ -30,14 +30,14 @@ CREATE TABLE links (
 CREATE UNIQUE INDEX links_url_digest_uq ON links (url_digest);
 
 CREATE TABLE link_clicks (
-  id         BIGSERIAL PRIMARY KEY,
-  code       VARCHAR(7) NOT NULL
-         CHECK (code ~ '^[A-Za-z0-9]{7}$'),
-  clicked_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id         BIGSERIAL PRIMARY KEY,
+    code       VARCHAR(7) NOT NULL,
+    clicked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT link_clicks_code_format CHECK (code ~ '^[A-Za-z0-9]{7}$')
 );
 
 CREATE INDEX link_clicks_code_clicked_at_idx
-  ON link_clicks (code, clicked_at);
+    ON link_clicks (code, clicked_at);
 ```
 
 The primary key creates a unique B-tree index on `code`; this is the redirect lookup index. The unique B-tree index on `url_digest` makes repeated creates conflict on the exact-URL digest. There is no expiry index initially: redirects first look up a code, then check that row's expiry. Expired rows remain in the table. **[FR-1, FR-2, FR-9, NFR-5, NFR-7, A-1, L-3]**
@@ -46,7 +46,7 @@ The primary key creates a unique B-tree index on `code`; this is the redirect lo
 
 ### Schema initialization
 
-Manage schema changes as versioned Alembic migrations. The initial migration creates `links` and its constraints/indexes. Start the one-service PostgreSQL Compose configuration, wait for its health check, then run `alembic upgrade head` once before starting the application. Do not run migrations on every request or silently create/alter tables during app startup. Run the same migration before integration tests. **[NFR-6, NFR-7]**
+Manage schema changes as versioned Alembic migrations. The initial migration creates `links` and its constraints/indexes. A second migration, `20260930_0002`, adds `link_clicks`; `alembic upgrade head` applies both. Start the one-service PostgreSQL Compose configuration, wait for its health check, then run `alembic upgrade head` once before starting the application. Do not run migrations on every request or silently create/alter tables during app startup. Run the same migration before integration tests. **[NFR-6, NFR-7]**
 
 Compute `url_digest` as SHA-256 over the exact UTF-8 bytes of the submitted URL, without URL normalization. Generate a candidate code with a cryptographically secure random source from the Base62 alphabet (`A-Z`, `a-z`, `0-9`). If the `code` primary key collides, generate another code and retry. Seven Base62 characters provide about 3.52 trillion possible codes; the database constraint and retry are still required. **[FR-1, A-1]**
 
@@ -155,7 +155,7 @@ The unique digest index arbitrates concurrent requests for the same exact URL. P
 - **Random code collision:** the unique code constraint rejects the insert; retry with a newly generated code. If a bounded retry policy is exhausted, return `503` and log a sanitized operational error. **[FR-1, NFR-2]**
 - **Rate limit reached:** return `429`; no database write is attempted. **[NFR-1]**
 - **Expired mapping:** retain its row but return `404`. A valid repeated create updates expiry under the stated rule and revives that same code. **[FR-9, A-2, A-3, L-3]**
-- **Click-event write failure:** log a sanitized warning containing the short code only and preserve the `302`; events may be lost. The lookup's existing typed pool/connection/statement failures still return sanitized `503` before the analytics hook. **[FR-2, FR-8, FR-13, NFR-2, NFR-8, L-7]**
+- **Click-event write failure:** log a sanitized warning containing the short code only and preserve the `302`; events may be lost. A failing or slow write can delay the `302` by up to the 250 ms pool wait or the 1 s statement timeout before the exception is caught. The lookup's existing typed pool/connection/statement failures still return sanitized `503` before the analytics hook. **[FR-2, FR-8, FR-13, NFR-2, NFR-8, L-7]**
 
 ## Rate Limiter
 
@@ -171,7 +171,7 @@ Use an in-process sliding window keyed by direct client IP, storing request time
 - **Limiter tests:** ten requests within a rolling minute are allowed and the next is rejected; old timestamps and inactive IP state are cleaned up; direct peer IP is used rather than forwarded headers. **[NFR-1, L-1, L-6]**
 - **Compose smoke test:** start the one-service PostgreSQL Compose configuration, initialize the schema, run the application, and exercise create and redirect end to end. **[NFR-6]**
 - **Database timeout/pool tests:** verify bounded pool configuration, pool-acquisition timeout, connection timeout handling, statement timeout cancellation/rollback, and sanitized `503` responses. **[NFR-2, NFR-3, NFR-4, NFR-6]**
-- **Click analytics tests:** active redirects attempt one event; malformed, missing, and expired codes attempt none; typed insert failure and a missing event table still produce the original `302` and `Location`; migration upgrade/downgrade preserves `links`. **[FR-2, FR-8, FR-9, FR-13, NFR-2, NFR-8, L-7]**
+- **Click analytics tests:** active redirects attempt one event; malformed, missing, and expired codes attempt none; typed insert failure and a missing event table still produce the original `302` and `Location`; migration upgrade/downgrade preserves `links`; the confirmed seeder `--reset` truncates `link_clicks` before `links`. **[FR-2, FR-8, FR-9, FR-13, NFR-2, NFR-8, L-7]**
 - **Performance test:** with a documented machine, dataset, and traffic profile, measure server-side p99 for redirects and creates. Use average redirect load in A-6 (about 100 requests/second) for the NFR-3 pass/fail result, including pool acquisition; measure peak load in A-6 (about 1,000 requests/second) separately and report it without using it as a pass/fail target. Include the expected 100:1 read-to-write ratio from A-5 in the mixed workload where practical. Measure creates under A-7. Benchmark indexed lookup at the expected data scale; if average-load redirect p99 misses 200 ms, evaluate caching as a later change. **[NFR-3, NFR-4, NFR-5, A-4, A-5, A-6, A-7, A-8]**
 
 ## Limitations
@@ -181,7 +181,7 @@ Use an in-process sliding window keyed by direct client IP, storing request time
 - Expired mappings are never deleted, so storage grows over time. **[L-3]**
 - Resubmitting an expiring URL without expiry makes it permanent under the agreed rule. **[L-4]**
 - No cache is present initially; redirect latency depends on PostgreSQL and must be measured. **[NFR-3]**
-- Click events are best-effort: failures lose events, retries/deduplication and bot filtering are absent, and storage grows without a retention policy. **[FR-13, NFR-2, NFR-8, L-7]**
+- Click events are best-effort: failures lose events, retries/deduplication and bot filtering are absent, and storage grows without a retention policy. A failing or slow click write can delay the redirect by up to the pool-acquisition wait (250 ms) or the statement timeout (1 s). **[FR-13, NFR-2, NFR-8, L-7]**
 - Malicious URL reputation checks are not implemented. **[Out of scope: malicious URL detection]**
 - A SHA-256 collision is not separately checked by design, consistent with the no-full-URL-comparison decision. **[NFR-7]**
 - If deployed behind a proxy while forwarded headers remain untrusted, all requests may appear to come from the proxy's IP and share one rate-limit bucket. **[NFR-1, L-6]**

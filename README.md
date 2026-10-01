@@ -91,17 +91,19 @@ choosing any platform override.
    correct result is that these values are set in this window; PowerShell
    prints no output for the assignments.
 
-6. Apply the schema using Alembic, then confirm the table exists:
+6. Apply the schema using Alembic, then confirm both tables exist:
 
    ```powershell
    python -m alembic upgrade head
    docker compose exec -T postgres psql -U url_shortener -d url_shortener -c "\d links"
+   docker compose exec -T postgres psql -U url_shortener -d url_shortener -c "\d link_clicks"
    ```
 
    Alembic may print little or nothing on success. A correct result is the
    `\d links` output showing the columns `code`, `url_digest`, `original_url`,
-   `expires_at`, and `created_at`. App startup does not create or migrate
-   tables.
+   `expires_at`, and `created_at`, and the `\d link_clicks` output showing
+   `id`, `code`, and `clicked_at`. `alembic upgrade head` applies both
+   migrations. App startup does not create or migrate tables.
 
 7. Start one app worker:
 
@@ -313,16 +315,20 @@ The running app also serves the interactive `/docs` UI and `/openapi.json`.
   including the missing request-body size limit, limiter memory bounds, IPv6
   address rotation, shorthand/CGNAT/multicast hosts, and the punycode-only
   internationalized-host policy.
-- The redirect load profile was not run, so NFR-3 has not been measured. The
-  create profile was run once from one source address with 36 requests; its p99
-  is statistically weak.
+- NFR-3 (p99 below 200 ms at 100 redirects/second) is **not met** on the
+  development machine (Windows ARM, 8 cores, Docker PostgreSQL, one worker,
+  pool 10): the 100/s run failed with p99 2,328 ms (saturated). The service
+  handled about 90/s with all 302 responses. Clean runs were at 25 and 50
+  requests/second (25/s: p99 51.8 ms). No tuning was attempted. The create
+  profile was run once from one source address with 36 requests; its p99 is
+  statistically weak.
 
 ## Repository Map
 
 | Path | Purpose |
 |---|---|
 | `url_shortener/` | FastAPI app, validation, expiry, persistence, DB pool/settings, limiter, and Jinja template. |
-| `alembic/` | Versioned PostgreSQL schema migration and Alembic environment. |
+| `alembic/` | Versioned PostgreSQL schema migrations (`links`, `link_clicks`) and the Alembic environment. |
 | `tests/` | Unit, API, and PostgreSQL integration tests. |
 | `scripts/` | Quality checks, benchmark seeder, load-test harness, and OpenAPI exporter. |
 | `docs/requirements.md` | Functional/non-functional requirements, assumptions, limitations. |

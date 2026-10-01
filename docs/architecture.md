@@ -81,7 +81,7 @@ The click insert is attempted once only for a found, unexpired link. It stores t
 - **L-4:** repeating an expiring URL without expiry makes it permanent.
 - **L-5:** alternate numeric IPv4 forms are not normalized.
 - **L-6:** behind a proxy, clients may share the proxy's direct-IP rate-limit bucket; forwarded headers are not trusted.
-- **L-7:** click events can be lost on failure; there is no deduplication or bot filtering, and the event table grows without a retention policy.
+- **L-7:** click events can be lost on failure; there is no deduplication or bot filtering, and the event table grows without a retention policy. A failing or slow click write can delay the redirect by up to the 250 ms pool-acquisition wait or the 1 s statement timeout before the 302 is returned.
 
 ### Additional Known Gaps (Not in requirements.md)
 
@@ -91,7 +91,7 @@ The click insert is attempted once only for a found, unexpired link. It stores t
 - IPv6 clients can rotate source addresses within a `/64` and obtain separate limiter buckets.
 - Numeric shorthand such as `127.1`, CGNAT addresses, and multicast ranges are accepted by the current parser/policy.
 - Unicode internationalized hostnames must be submitted as ASCII punycode; Unicode authority text is rejected.
-- The create profile was run once from one source address with 36 requests, so its p99 is statistically weak. The redirect-average profile was not run for acceptance; NFR-3 is not demonstrated at its 100 requests/second target. A lower-rate baseline and saturation runs are recorded by the engineer outside the automated test suite.
+- NFR-3 is **not met** on the development machine (Windows ARM, 8 cores, Docker PostgreSQL, one worker, pool 10): the 100/s redirect-average run failed with p99 2,328 ms (saturated, generator-limited). The service handled about 90/s with all 302 responses; a 99/s run already showed p99 1,495 ms. Clean runs were at 25 and 50 requests/second (25/s: p99 51.8 ms). No tuning was attempted. The create profile was run once from one source address with 36 requests, so its p99 is statistically weak. Baseline and saturation runs are recorded by the engineer in the AI usage log, outside the automated test suite.
 - Seeded benchmark rows use short synthetic URLs (about 38 characters), so the storage extrapolation to 10M rows (about 2.2 GB) understates real table size; index size does not depend on URL length.
 
 ## Deviations from design.md (for review)

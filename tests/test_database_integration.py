@@ -742,12 +742,13 @@ def test_redirect_404_cases_do_not_record_clicks(database_url: str) -> None:
 
 def test_missing_clicks_table_does_not_change_redirect(
     database_url: str,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     settings = _base_settings(database_url)
     submitted_url = f"https://example.test/click-missing-table/{uuid4().hex}"
     hidden_table_name = "link_clicks_hidden_for_test"
 
-    with TestClient(create_app(settings)) as client:
+    with caplog.at_level(logging.WARNING), TestClient(create_app(settings)) as client:
         created = client.post("/api/links", json={"url": submitted_url})
         code = created.json()["code"]
         with psycopg.connect(database_url) as connection:
@@ -762,9 +763,17 @@ def test_missing_clicks_table_does_not_change_redirect(
                     f'ALTER TABLE "{hidden_table_name}" RENAME TO link_clicks'
                 )
 
+    with psycopg.connect(database_url) as connection:
+        click_rows = connection.execute(
+            "SELECT count(*) FROM link_clicks WHERE code = %s", (code,)
+        ).fetchone()
+
     assert created.status_code == 200
     assert redirected.status_code == 302
     assert redirected.headers["location"] == submitted_url
+    assert code in caplog.text
+    assert submitted_url not in caplog.text
+    assert click_rows == (0,)
 
 
 def test_click_migration_downgrade_preserves_links(database_url: str) -> None:
