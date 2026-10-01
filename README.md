@@ -177,3 +177,20 @@ loopback, which is an upper bound for server-side latency (so it includes
 client scheduling and loopback overhead). Results depend on the machine. If a
 target is missed, report it as not met; peak and overload results never replace
 the average-load NFR-3 run.
+
+## API specification
+
+`docs/openapi.json` is the checked-in OpenAPI description of the API as built.
+Regenerate it after changing route metadata with:
+
+```powershell
+python -m scripts.export_openapi
+```
+
+Check that the artifact matches without rewriting it with:
+
+```powershell
+python -m scripts.export_openapi --check
+```
+
+The running app also serves the interactive `/docs` UI and `/openapi.json`.

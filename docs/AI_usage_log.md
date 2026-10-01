@@ -3848,3 +3848,275 @@ The additional gaps are documented in the architecture file: no body-size limit;
 All four quality gates passed. The document is 90 lines. The pre-existing edit to `AI_usage_log.md` was left untouched.
 
 Made changes.
+
+## Task 13:
+### Prompt: 
+This is a NEW task: Task 13. Tasks 1 through 12 are already committed. Do not
+summarize earlier tasks. Before writing any code, reply with the list of files
+you will create or change, then proceed.
+
+Task 13 from docs/tasks.md: Export the OpenAPI specification. Read
+docs/tasks.md (Task 13), docs/requirements.md (FR-1, FR-2, FR-7 to FR-12),
+docs/design.md (API Contract, Errors), and url_shortener/app.py. Do not modify
+anything under docs/ EXCEPT creating the new file docs/openapi.json. Do not
+modify validation.py, rate_limiter.py, expiry.py, links.py, database.py,
+settings.py, alembic/, or any existing test. Do not commit or push.
+
+Intent: a reproducible OpenAPI JSON artifact that accurately describes the
+API as built, plus a check that fails when the artifact and the routes drift.
+
+Scope:
+1. scripts/export_openapi.py: builds the app with create_app() WITHOUT running
+   its startup (no database, no environment variables needed; app.openapi()
+   only), and writes docs/openapi.json deterministically (json.dumps with
+   indent=2, sort_keys=True, ensure_ascii=False, trailing newline, LF line
+   endings). A --check flag compares the generated spec with the committed file
+   and exits nonzero with a fixed message if they differ, never printing the
+   spec. The documented regeneration command goes in the README. Note:
+   create_app() has a module-level app = create_app() in app.py that already
+   reads no environment at import time; confirm importing it needs no
+   database or variables, and say so.
+2. The generated spec is currently incomplete because the handlers read the
+   body by hand. Make it accurate using ONLY decorator and constructor
+   metadata in url_shortener/app.py (responses=..., openapi_extra=...,
+   summary, response_model/response_class, FastAPI(title=..., version=...)).
+   NO change to any handler body, any dependency, route order, handler
+   registration, or runtime behavior. Document:
+   - POST /api/links: request body {"url": string (required), "expires_at":
+     string, RFC 3339 with timezone (optional)}; 200 for BOTH a new and a
+     reused link, body {code, short_url, expires_at (nullable)}; 422, 429,
+     503 using one shared Error schema {"error": {"code", "message"}}.
+   - GET /{code}: path parameter code (7 Base62 characters); 302 with a
+     Location header; 404 and 503 with the Error schema.
+   - GET /: 200 text/html. POST /: form fields url (required) and expires_at
+     (optional), 200, 422, 429, and 503 as text/html.
+   Name the Error schema once under components and reference it everywhere.
+3. A short README section "API specification": what the file is, the
+   regeneration command, the check command, and a note that /docs and
+   /openapi.json are also served by the running app.
+
+Tests (tests/test_openapi.py; no network, no database):
+- The committed docs/openapi.json parses and exactly equals the freshly
+  generated spec (this is the drift check).
+- The spec contains the expected paths and methods and nothing unexpected.
+- POST /api/links documents a requestBody with the url and expires_at
+  properties and the responses 200, 422, 429, 503, with 200 described for new
+  and reused links; GET /{code} documents 302 (with a Location header), 404,
+  and 503; every error response references the same Error schema component.
+- Regenerating twice produces byte-identical output.
+- The spec contains no secrets or local paths: assert it does not contain
+  "pass123", "password", "C:\\", or the machine username (use sentinel
+  strings for the test).
+- All existing tests still pass UNCHANGED, which proves no behavior changed.
+
+Constraints: no new dependencies (do not add an OpenAPI validator; structural
+checks with json are enough); all four quality gates pass (python
+scripts/check.py) plus pytest; no global suppressions. The suite has 233
+tests; report the new count. List every file created or changed and every
+change you made to app.py, line by line, so I can confirm it is metadata only.
+
+#### Response:
+Files I will change/create: change `app.py` metadata only and `README.md`; create scripts/export_openapi.py, docs/openapi.json, and tests/test_openapi.py. I’ve confirmed `app = create_app()` constructs routes without reading environment variables or opening the database; pool startup occurs only in the lifespan, and `app.openapi()` does not run it. I’m checking the exact Task 13/API-contract wording once more before editing.
+
+Read 
+
+Read , lines 215 to 255
+
+Read , lines 55 to 120
+
+I’m now making the metadata-only app edits: add OpenAPI schema classes/constants, title/version on `FastAPI`, summaries and response metadata on the four route decorators, JSON request-body metadata for the hand-parsed API, form request-body metadata, and the redirect `Location`/code-pattern metadata. I will not touch any handler body, dependency, route order, or exception registration.
+
+Generating patch (185 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -c "import os; os.environ.pop('DATABASE_URL', None); os.environ.pop('PUBLIC_BASE_URL', None); from url_shortener.app import app; spec = app.openapi(); print(spec['info']); print(sorted(spec['paths']))"
+Completed with input: & .\.venv\Scripts\python.exe -c "import os; os.environ.pop('DATABASE_URL', None); os.environ.pop('PUBLIC_BASE_URL', None); from url_shortener.app import app; spec = app.openapi(); print(spec['info']); print(sorted(spec['paths']))"
+
+The metadata probe caught a missing `HTMLResponse` import introduced by the form route metadata. I’m adding only that import, then I’ll rerun the same import/OpenAPI probe before proceeding.
+
+Generating patch (6 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -c "import os; os.environ.pop('DATABASE_URL', None); os.environ.pop('PUBLIC_BASE_URL', None); from url_shortener.app import app; spec = app.openapi(); print(spec['info']); print(sorted(spec['paths']))"
+
+The no-environment probe now succeeds: importing the module-level app and calling `app.openapi()` needs neither `DATABASE_URL` nor `PUBLIC_BASE_URL`, and it does not run lifespan. FastAPI exposes exactly `/`, `/api/links`, and `/{code}` in the spec. I’m adding the deterministic exporter and structural/drift tests next, then I’ll generate the committed artifact.
+
+Generating patch (169 lines) in , 
+
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_openapi.py -q
+Completed with input: & .\.venv\Scripts\python.exe -m pytest tests/test_openapi.py -q
+
+The exporter generated four of seven checks successfully. The failures show two metadata gaps: the success description needs to explicitly say “new and reused,” and FastAPI’s auto-generated path parameter isn’t taking the regex from `openapi_extra`. The missing artifact failure is expected until generation. I’m inspecting the exact parameter output, then I’ll fix it with decorator metadata only.
+
+Ran terminal command: & .\.venv\Scripts\python.exe -c "import json, os; os.environ.pop('DATABASE_URL', None); os.environ.pop('PUBLIC_BASE_URL', None); from url_shortener.app import app; op=app.openapi()['paths']['/{code}']['get']; print(json.dumps(op['parameters'], indent=2)); print(op['responses']['200']['description'] if '200' in op['responses'] else 'no 200')"
+
+The generated redirect operation currently contains the auto parameter plus the custom `openapi_extra` parameter, so the artifact would have a duplicate. I’m checking FastAPI’s path-parameter metadata options for a schema-only pattern that preserves the handler’s runtime string behavior; I’ll avoid validators that could turn the runtime 404 into a 422.
+
+No matches found. Your search pattern might be excluded completely by either the search.exclude settings or .*ignore files.
+If you believe that it should have results, you can check into the .*ignore files and the exclude setting (here are some excluded patterns for reference:[**/node_modules,**/bower_components,**/*.code-search]).
+Then if you want to include those files you can call the tool again by setting "includeIgnoredFiles" to true.
+
+Read 
+
+Read , lines 450 to 570
+
+FastAPI concatenates operation-level `openapi_extra.parameters` with its automatically generated path parameter, causing the duplicate. I’ll move only the regex into `Path(json_schema_extra=...)` on the required `code` parameter; that documents the pattern without adding runtime validation or changing the handler body. I’ll also make the 200 description explicitly say “new and reused.”
+
+Generating patch (43 lines) in , 
+
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_openapi.py -q -k "not committed"
+
+The structural OpenAPI tests now pass (`6 passed`), confirming the single code parameter, regex, shared JSON Error component, and content types. I’m adding explicit check-mode coverage, a short README API-specification section, and then I’ll generate `docs/openapi.json` using the exporter—without starting app lifespan.
+
+Generating patch (66 lines) in , 
+
+The README patch context didn’t match the current file ending, so the combined patch made no changes. I’m rereading the current test file and README tail, then I’ll apply the tests and documentation in separate, exact-context patches.
+
+Read 
+
+Read , lines 180 to 180
+
+Read , lines 115 to 180
+
+Apply Patch
+
+Generating patch (50 lines) in 
+
+
+```
+
+```
+
+
+Generating patch (23 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m scripts.export_openapi
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_openapi.py -q
+
+The artifact is generated, and all nine OpenAPI-specific tests pass. I’m now running the exporter’s read-only `--check`, the full pytest suite, and all four quality gates; no server or database is involved.
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m scripts.export_openapi --check
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+Completed with input: & .\.venv\Scripts\python.exe scripts/check.py
+
+Ran terminal command: git diff --check -- README.md url_shortener/app.py scripts/export_openapi.py tests/test_openapi.py docs/openapi.json
+
+Ran terminal command: git status --short
+
+Read 
+
+All behavior tests pass, but the quality gates found typing/style issues in the metadata dictionaries and their test helper; no route behavior or schemas failed structurally. I’m adding explicit `Any`-based metadata typings and wrapping the flagged description lines, then I’ll format, regenerate the artifact, and rerun checks.
+
+Generating patch (42 lines) in , 
+
+The patch context for the test import was stale, so nothing was applied. I’m rereading the exact current import and metadata sections in `app.py` and `test_openapi.py`, then I’ll apply the typing/style fix against those contents.
+
+Read , lines 1 to 90
+
+Read , lines 270 to 440
+
+Read 
+
+Generating patch (56 lines) in , 
+
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m ruff format url_shortener/app.py scripts/export_openapi.py tests/test_openapi.py
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m ruff check --fix url_shortener/app.py scripts/export_openapi.py tests/test_openapi.py
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m scripts.export_openapi
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_openapi.py -q
+
+The generated artifact now passes all eight OpenAPI tests, including check-mode and secret/path scans. I’ve kept app edits to schema definitions and metadata: no endpoint body, dependency, exception handler, or route order changed. I’m running the full suite, exporter drift check, and all quality gates now, then I’ll inspect the app diff for the requested line-by-line summary.
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m scripts.export_openapi --check
+
+Ran terminal command: git diff --check -- README.md url_shortener/app.py scripts/export_openapi.py tests/test_openapi.py docs/openapi.json
+
+Ran terminal command: git status --short
+
+The final suite reports **213 passed, 28 skipped (241 total)**; all quality gates and the exporter drift check pass. I’m reviewing the precise `app.py` diff and line locations so the final change list can enumerate every metadata-only app edit as requested.
+
+Ran terminal command: git diff --unified=0 -- url_shortener/app.py
+
+Ran terminal command: Select-String -Path url_shortener\app.py -Pattern '^from fastapi import|^from fastapi.responses|^from pydantic|^class Error|^class CreateLinkResponse|^_JSON_ERROR|^_HTML_ERROR|^    application = FastAPI|^    @application\.(post|get)|^    async def redirect_link|^        code: str = FastAPIPath' | Select-Object LineNumber,Line
+
+Ran terminal command: Select-String -Path README.md -Pattern '^## API specification' | Select-Object LineNumber,Line
+
+Created the reproducible OpenAPI artifact and drift checker. Importing `url_shortener.app` and calling `app.openapi()` worked with `DATABASE_URL` and `PUBLIC_BASE_URL` removed; no app lifespan or database connection was started.
+
+**Files**
+Changed: `README.md`, `app.py`.
+
+Created: `openapi.json`, `export_openapi.py`, `test_openapi.py`.
+
+**`app.py` metadata changes, line by line**
+- Lines 7, 11, 13, and 15: added typing, FastAPI path/HTML response, and Pydantic schema imports.
+- Lines 40, 45, and 49: added `ErrorDetail`, shared `Error`, and create-success schema models.
+- Lines 55 and 60: declared shared JSON and HTML error-response metadata.
+- Line 247: set the OpenAPI title and version.
+- Line 272: documented `POST /api/links`, its JSON body, success schema, and 422/429/503 responses.
+- Line 325: documented `GET /` as HTML.
+- Line 339: documented `POST /` form fields and HTML status responses.
+- Line 399: documented the redirect status, `Location`, error responses, and code parameter pattern; `FastAPIPath` adds schema metadata without adding pattern validation.
+
+No handler body, dependency, exception registration, route order, or error-handler behavior was changed.
+
+**Verification**
+`python -m scripts.export_openapi --check` and all four quality gates pass. Pytest reports **213 passed, 28 skipped: 241 tests total**. The skips are the existing database integration tests. No separate implementation decision needs review beyond the chosen OpenAPI title and version (`AI URL Shortener API`, `1.0.0`).
+
+Made changes.

@@ -4,13 +4,15 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Path as FastAPIPath
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from jinja2 import Environment, FileSystemLoader
+from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 from starlette.templating import Jinja2Templates
 
@@ -33,6 +35,42 @@ from url_shortener.settings import Settings
 from url_shortener.validation import URLValidationError, validate_url
 
 _SHORT_CODE_PATTERN = re.compile(r"[A-Za-z0-9]{7}")
+
+
+class ErrorDetail(BaseModel):
+    code: str
+    message: str
+
+
+class Error(BaseModel):
+    error: ErrorDetail
+
+
+class CreateLinkResponse(BaseModel):
+    code: str = Field(pattern=r"^[A-Za-z0-9]{7}$")
+    short_url: str
+    expires_at: datetime | None
+
+
+_JSON_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    422: {"model": Error, "description": "Invalid request data."},
+    429: {"model": Error, "description": "Create rate limit exceeded."},
+    503: {"model": Error, "description": "Service temporarily unavailable."},
+}
+_HTML_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    422: {
+        "description": "Invalid form data.",
+        "content": {"text/html": {"schema": {"type": "string"}}},
+    },
+    429: {
+        "description": "Create rate limit exceeded.",
+        "content": {"text/html": {"schema": {"type": "string"}}},
+    },
+    503: {
+        "description": "Service temporarily unavailable.",
+        "content": {"text/html": {"schema": {"type": "string"}}},
+    },
+}
 _HTML_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "Content-Security-Policy": (
@@ -206,7 +244,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             database.close()
 
-    application = FastAPI(lifespan=lifespan)
+    application = FastAPI(
+        title="AI URL Shortener API",
+        version="1.0.0",
+        lifespan=lifespan,
+    )
     application.state.create_rate_limiter = SlidingWindowRateLimiter()
     application.add_exception_handler(
         CreateRateLimitExceeded, app_rate_limit_exception_handler
@@ -227,7 +269,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         CodeGenerationExhaustedError, code_generation_exception_handler
     )
 
-    @application.post("/api/links", dependencies=[Depends(enforce_create_rate_limit)])
+    @application.post(
+        "/api/links",
+        dependencies=[Depends(enforce_create_rate_limit)],
+        summary="Create or reuse a short link",
+        responses={
+            200: {
+                "model": CreateLinkResponse,
+                "description": "HTTP 200 for both new and reused links.",
+            },
+            **_JSON_ERROR_RESPONSES,
+        },
+        openapi_extra={
+            "requestBody": {
+                "required": True,
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "type": "object",
+                            "required": ["url"],
+                            "properties": {
+                                "url": {"type": "string"},
+                                "expires_at": {
+                                    "type": ["string", "null"],
+                                    "format": "date-time",
+                                    "description": (
+                                        "Optional RFC 3339 timestamp with an explicit "
+                                        "timezone."
+                                    ),
+                                },
+                            },
+                        }
+                    }
+                },
+            }
+        },
+    )
     async def create_link(request: Request) -> dict[str, str | datetime | None]:
         try:
             payload = await request.json()
@@ -245,11 +322,57 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "expires_at": result.expires_at,
         }
 
-    @application.get("/")
+    @application.get(
+        "/",
+        response_class=HTMLResponse,
+        summary="Show the short-link form",
+        responses={
+            200: {
+                "description": "HTML create form.",
+                "content": {"text/html": {"schema": {"type": "string"}}},
+            }
+        },
+    )
     async def create_form_page(request: Request) -> Response:
         return _render_form(request)
 
-    @application.post("/", dependencies=[Depends(enforce_create_rate_limit)])
+    @application.post(
+        "/",
+        dependencies=[Depends(enforce_create_rate_limit)],
+        response_class=HTMLResponse,
+        summary="Create or reuse a short link from the form",
+        responses={
+            200: {
+                "description": "HTML form with the created or reused short URL.",
+                "content": {"text/html": {"schema": {"type": "string"}}},
+            },
+            **_HTML_ERROR_RESPONSES,
+        },
+        openapi_extra={
+            "requestBody": {
+                "required": True,
+                "content": {
+                    "application/x-www-form-urlencoded": {
+                        "schema": {
+                            "type": "object",
+                            "required": ["url"],
+                            "properties": {
+                                "url": {"type": "string"},
+                                "expires_at": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "description": (
+                                        "Optional RFC 3339 timestamp with an explicit "
+                                        "timezone."
+                                    ),
+                                },
+                            },
+                        }
+                    }
+                },
+            }
+        },
+    )
     async def create_form(request: Request) -> Response:
         try:
             form = await request.form()
@@ -273,8 +396,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return _render_form(request, short_url=result.short_url)
 
     # Register any future fixed GET paths before this dynamic route.
-    @application.get("/{code:path}", response_model=None)
-    async def redirect_link(code: str, request: Request) -> Response:
+    @application.get(
+        "/{code:path}",
+        response_model=None,
+        response_class=RedirectResponse,
+        status_code=302,
+        summary="Redirect a short code",
+        responses={
+            302: {
+                "description": "Redirect to the stored original URL.",
+                "headers": {
+                    "Location": {
+                        "description": "Stored original URL.",
+                        "schema": {"type": "string", "format": "uri-reference"},
+                    }
+                },
+            },
+            404: {
+                "model": Error,
+                "description": "Malformed, missing, or expired code.",
+            },
+            503: {"model": Error, "description": "Service temporarily unavailable."},
+        },
+    )
+    async def redirect_link(
+        request: Request,
+        code: str = FastAPIPath(
+            description="Seven-character Base62 short code.",
+            json_schema_extra={"pattern": "^[A-Za-z0-9]{7}$"},
+        ),
+    ) -> Response:
         if _SHORT_CODE_PATTERN.fullmatch(code) is None:
             return _not_found_response()
 
