@@ -1,6 +1,7 @@
 import logging
 import os
 import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -84,6 +85,25 @@ def _code() -> str:
 
 def _digest() -> bytes:
     return uuid4().bytes + uuid4().bytes
+
+
+def _run_alembic(
+    database_url: str,
+    migration: Callable[[Config, str], None],
+    revision: str,
+) -> None:
+    root = Path(__file__).resolve().parents[1]
+    config = Config(str(root / "alembic.ini"))
+    config.set_main_option("script_location", str(root / "alembic"))
+    previous_database_url = os.environ.get("DATABASE_URL")
+    os.environ["DATABASE_URL"] = database_url
+    try:
+        migration(config, revision)
+    finally:
+        if previous_database_url is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = previous_database_url
 
 
 def test_migration_applies_and_is_repeatable(database_url: str) -> None:
@@ -659,3 +679,115 @@ def test_form_escapes_url_through_real_postgres(
     assert "<script>" not in response.text
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in response.text
     assert "https://jrb.sh/" in response.text
+
+
+def test_successful_redirect_records_exactly_one_click(database_url: str) -> None:
+    settings = _base_settings(database_url)
+    submitted_url = f"https://example.test/click-event/{uuid4().hex}"
+    with TestClient(create_app(settings)) as client:
+        created = client.post("/api/links", json={"url": submitted_url})
+        code = created.json()["code"]
+        redirected = client.get(f"/{code}", follow_redirects=False)
+
+    with psycopg.connect(database_url) as connection:
+        events = connection.execute(
+            "SELECT code, clicked_at FROM link_clicks WHERE code = %s", (code,)
+        ).fetchall()
+
+    assert created.status_code == 200
+    assert redirected.status_code == 302
+    assert redirected.headers["location"] == submitted_url
+    assert len(events) == 1
+    assert events[0][0] == code
+    assert events[0][1].tzinfo is not None
+
+
+def test_redirect_404_cases_do_not_record_clicks(database_url: str) -> None:
+    settings = _base_settings(database_url)
+    database = Database(settings)
+    database.open()
+    submitted_url = f"https://example.test/click-expired/{uuid4().hex}"
+    created_at = datetime.now(UTC)
+    try:
+        expired = create_or_reuse_link(
+            database,
+            submitted_url,
+            created_at - timedelta(seconds=1),
+            created_at,
+        )
+    finally:
+        database.close()
+
+    missing_code = _code()
+    with psycopg.connect(database_url) as connection:
+        while connection.execute(
+            "SELECT 1 FROM links WHERE code = %s", (missing_code,)
+        ).fetchone():
+            missing_code = _code()
+        before = connection.execute("SELECT count(*) FROM link_clicks").fetchone()
+
+    with TestClient(create_app(settings)) as client:
+        malformed = client.get("/bad-code!", follow_redirects=False)
+        missing = client.get(f"/{missing_code}", follow_redirects=False)
+        expired_response = client.get(f"/{expired.code}", follow_redirects=False)
+
+    with psycopg.connect(database_url) as connection:
+        after = connection.execute("SELECT count(*) FROM link_clicks").fetchone()
+
+    assert malformed.status_code == 404
+    assert missing.status_code == 404
+    assert expired_response.status_code == 404
+    assert after == before
+
+
+def test_missing_clicks_table_does_not_change_redirect(
+    database_url: str,
+) -> None:
+    settings = _base_settings(database_url)
+    submitted_url = f"https://example.test/click-missing-table/{uuid4().hex}"
+    hidden_table_name = "link_clicks_hidden_for_test"
+
+    with TestClient(create_app(settings)) as client:
+        created = client.post("/api/links", json={"url": submitted_url})
+        code = created.json()["code"]
+        with psycopg.connect(database_url) as connection:
+            connection.execute(
+                f'ALTER TABLE link_clicks RENAME TO "{hidden_table_name}"'
+            )
+        try:
+            redirected = client.get(f"/{code}", follow_redirects=False)
+        finally:
+            with psycopg.connect(database_url) as connection:
+                connection.execute(
+                    f'ALTER TABLE "{hidden_table_name}" RENAME TO link_clicks'
+                )
+
+    assert created.status_code == 200
+    assert redirected.status_code == 302
+    assert redirected.headers["location"] == submitted_url
+
+
+def test_click_migration_downgrade_preserves_links(database_url: str) -> None:
+    code = _code()
+    with psycopg.connect(database_url) as connection:
+        _insert(connection, code, _digest())
+
+    _run_alembic(database_url, command.downgrade, "20260929_0001")
+    try:
+        with psycopg.connect(database_url) as connection:
+            relations = connection.execute(
+                "SELECT to_regclass('public.links'), to_regclass('public.link_clicks')"
+            ).fetchone()
+            retained_link = connection.execute(
+                "SELECT code FROM links WHERE code = %s", (code,)
+            ).fetchone()
+        assert relations == ("links", None)
+        assert retained_link == (code,)
+    finally:
+        _run_alembic(database_url, command.upgrade, "head")
+
+    with psycopg.connect(database_url) as connection:
+        click_table = connection.execute(
+            "SELECT to_regclass('public.link_clicks')"
+        ).fetchone()
+    assert click_table == ("link_clicks",)

@@ -25,6 +25,7 @@ SELECT code, original_url, expires_at
 FROM links
 WHERE code = %s
 """
+_INSERT_CLICK = "INSERT INTO link_clicks (code) VALUES (%s)"
 
 
 class CodeGenerationExhaustedError(RuntimeError):
@@ -77,3 +78,8 @@ def get_link_by_code(database: Database, code: str) -> Link | None:
     if row is None:
         return None
     return Link(code=row[0], original_url=row[1], expires_at=row[2])
+
+
+def record_link_click(database: Database, code: str) -> None:
+    with database.connection() as connection:
+        connection.execute(_INSERT_CLICK, (code,))

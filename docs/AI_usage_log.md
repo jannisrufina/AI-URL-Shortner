@@ -4444,3 +4444,64 @@ Made changes.
 - Saturation evidence: 90/s p99 103 ms (generator-limited); 99/s p99 1,495 ms; 100/s p99 2,328 ms.
 - Threshold recorded before phase B (D-57).
 - NFR-3: 100 redirects/s not demonstrated on this machine; no tuning attempted.
+
+### Prompt:
+This is Task 15, Phase B (implementation). Phase A (the impact analysis) is finished and reviewed: docs/analytics-impact.md.
+
+STEP 0 - READ BEFORE ACTING
+Read these first and do not edit anything until you have: docs/analytics-impact.md, docs/requirements.md, docs/design.md, docs/architecture.md, docs/tasks.md (Task 15), url_shortener/app.py, url_shortener/links.py, url_shortener/database.py, url_shortener/settings.py, everything in alembic/versions/, scripts/seed_links.py, tests/test_redirects.py and tests/test_database_integration.py.
+
+CURRENT STATE
+- Python 3.11, FastAPI, psycopg 3 with a bounded pool, Alembic, PostgreSQL 16.
+- Latest migration revision: 20260929_0001 (create_links).
+- redirect_link in url_shortener/app.py already calls a no-op record_click(link) hook after the lookup and expiry check. Use that hook.
+- The test suite has <N> tests, all passing with TEST_DATABASE_URL set and 0 skipped.
+- Quality gate command: python -m scripts.check (Ruff lint, Ruff format --check, mypy strict, Bandit, pip-audit). It must pass.
+
+APPROACH (already chosen in Phase A, option b)
+A synchronous, append-only link_clicks table, written on each successful redirect, best-effort. The redirect must still return 302 with the same Location whenever the click write fails.
+
+WHAT TO BUILD
+
+1. Migration
+New Alembic revision after 20260929_0001 creating link_clicks:
+- id BIGSERIAL PRIMARY KEY
+- code VARCHAR(7) NOT NULL, with a CHECK matching the code format used on links
+- clicked_at TIMESTAMPTZ NOT NULL DEFAULT now()
+- an index on (code, clicked_at)
+Do NOT add a foreign key to links. The seeder's --reset runs TRUNCATE on links, which a foreign key would block. State this reason in the migration and in docs/design.md. The downgrade must drop the table and return cleanly to 20260929_0001.
+
+2. Click recording
+Implement record_click so it inserts one row using the existing connection pool, run through run_in_threadpool so the event loop is not blocked.
+- Wrap the write in 'except Exception'. On failure, log a warning with the short code but never the original URL, and continue.
+- A failed insert, a missing table or a pool timeout must never change the response: still 302, same Location.
+- Record clicks only for successful redirects. Never for 404, expired or malformed codes.
+- No new endpoints, response fields or headers. No analytics read API in this task.
+
+3. Documentation (small and accurate)
+- docs/requirements.md: add FR-13 (record a click per successful redirect, best-effort, and a redirect never fails because of it); NFR-8 (redirect latency must not regress beyond the threshold recorded by the engineer; the engineer measures this, not you); L-7 (clicks can be lost on failure, no deduplication, no bot filtering, unbounded table growth, no retention policy). Move click analytics out of 'Out of scope' accordingly.
+- docs/design.md and docs/architecture.md: describe the table, the data flow and the failure behaviour.
+- README.md: one short note under Limitations. Mention the migration only if the setup steps change.
+- Decide explicitly whether the seeder's --reset should also clear link_clicks, and document the decision. I prefer that it clears it.
+
+4. Tests
+Extend the existing test style. Do not write tests that cannot fail.
+- A successful redirect writes exactly one click row with the correct code.
+- 404 (missing, malformed, expired) writes none.
+- Failure injection: the insert raises, and the redirect is still 302 with the correct Location.
+- Missing table (drop it inside the test, or use a database without the migration): still 302.
+- Migration: upgrade creates the table; downgrade removes it and leaves links intact.
+- All existing tests pass unchanged.
+
+HARD CONSTRAINTS
+- Do NOT run load tests, the seeder at scale, or anything against url_shortener_bench. I run the before/after measurement myself. Do not claim any performance result.
+- Do not weaken or remove existing tests, quality gates or validation.
+- Do not touch docs/AI_usage_log.md. I maintain it myself.
+- Do not add dependencies.
+- Keep the change small. Touch only the files this task needs.
+- Do not commit or push. I will review the diff first.
+
+PROCESS
+1. Before editing, write a short plan: files to change, the migration, the failure behaviour, and anything in the Phase A analysis you disagree with. Then continue without waiting.
+2. Implement, then run 'python -m scripts.check' and the full pytest suite with TEST_DATABASE_URL set.
+3. Finish with an exact report: files changed, test count before and after, the gate output, and every assumption you made or requirement you could not meet. If something failed or you are unsure, say so plainly.

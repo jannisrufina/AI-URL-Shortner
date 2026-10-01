@@ -233,6 +233,7 @@ python -m scripts.seed_links --count 10000000 --seed 1 --allow-large --reset --c
 The commands leave `DATABASE_URL` pointing at the benchmark database for this
 PowerShell window. Use a separate window for benchmarking or reset it before
 running the application or tests. The sample-code files are ignored by git.
+The seeder's confirmed `--reset` clears `link_clicks` first, then `links`.
 
 ## Load Testing
 
@@ -300,6 +301,9 @@ The running app also serves the interactive `/docs` UI and `/openapi.json`.
 
 ## Limitations
 
+- Click analytics store only a short code and timestamp; writes are best-effort,
+  events can be lost on failure, and there is no deduplication, bot filtering,
+  or retention policy (L-7).
 - See [requirements.md](docs/requirements.md) for L-1 to L-6: the limiter is
   single-process and resets on restart; hostname DNS is not resolved; expired
   rows are retained; repeats without expiry become permanent; alternate IPv4

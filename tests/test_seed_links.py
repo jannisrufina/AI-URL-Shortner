@@ -289,7 +289,7 @@ def test_nonempty_table_refusal_is_cli_only_and_sanitized(
     assert not connection.rows
 
 
-def test_confirmed_reset_truncates_links_before_copy(
+def test_confirmed_reset_truncates_clicks_then_links_before_copy(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -310,6 +310,9 @@ def test_confirmed_reset_truncates_links_before_copy(
 
     output = capsys.readouterr()
     assert result == 0
+    assert connection.queries.index("TRUNCATE link_clicks") < connection.queries.index(
+        "TRUNCATE links"
+    )
     assert "TRUNCATE links" in connection.queries
     assert len(connection.rows) == 1
     assert "secret" not in output.out + output.err

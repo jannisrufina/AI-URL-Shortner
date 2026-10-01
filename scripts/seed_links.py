@@ -249,6 +249,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         with psycopg.connect(target_url) as connection:
             if args.reset:
                 with connection.transaction():
+                    connection.execute("TRUNCATE link_clicks")
                     connection.execute("TRUNCATE links")
             else:
                 exists = connection.execute(

@@ -202,3 +202,24 @@ def test_database_failures_return_sanitized_503(
         }
     }
     assert str(database_error) not in response.text
+
+
+def test_click_write_failure_keeps_redirect_and_logs_only_code(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    submitted_url = "https://example.test/private/path"
+
+    def fail_click_write(_database: Any, _code: str) -> None:
+        raise DatabasePoolTimeoutError("private URL must not enter the log")
+
+    monkeypatch.setattr(app_module, "record_link_click", fail_click_write)
+    link = Link("AbC1234", submitted_url, None)
+    with _client(monkeypatch, lambda _database, _code: link) as client:
+        response = client.get("/AbC1234", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == submitted_url
+    assert "AbC1234" in caplog.text
+    assert submitted_url not in caplog.text
+    assert "private URL must not enter the log" not in caplog.text

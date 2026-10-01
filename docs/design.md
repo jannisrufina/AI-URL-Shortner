@@ -28,9 +28,21 @@ CREATE TABLE links (
 );
 
 CREATE UNIQUE INDEX links_url_digest_uq ON links (url_digest);
+
+CREATE TABLE link_clicks (
+  id         BIGSERIAL PRIMARY KEY,
+  code       VARCHAR(7) NOT NULL
+         CHECK (code ~ '^[A-Za-z0-9]{7}$'),
+  clicked_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX link_clicks_code_clicked_at_idx
+  ON link_clicks (code, clicked_at);
 ```
 
 The primary key creates a unique B-tree index on `code`; this is the redirect lookup index. The unique B-tree index on `url_digest` makes repeated creates conflict on the exact-URL digest. There is no expiry index initially: redirects first look up a code, then check that row's expiry. Expired rows remain in the table. **[FR-1, FR-2, FR-9, NFR-5, NFR-7, A-1, L-3]**
+
+`link_clicks` is append-only and records only the seven-character short code and a `TIMESTAMPTZ` click time. It has no foreign key to `links`: the benchmark seeder's confirmed `--reset` truncates `links`, and a foreign key would block truncating that table alone. The reset explicitly truncates `link_clicks` first. There is no retention policy.
 
 ### Schema initialization
 
@@ -133,7 +145,7 @@ The unique digest index arbitrates concurrent requests for the same exact URL. P
 1. Validate the path code format; malformed or unknown codes produce `404`. **[FR-1, FR-9]**
 2. Query PostgreSQL by the parameterized `code` primary key. If no row exists, return `404`. **[FR-2, FR-9, NFR-2, NFR-5]**
 3. If `expires_at` is set and is less than or equal to the current UTC time, return `404`. **[FR-9]**
-4. Keep the future click-analytics hook after successful lookup and expiry validation, immediately before producing the redirect response. No analytics are emitted in the initial build. **[Out of scope: click analytics]**
+4. After a successful lookup and expiry check, attempt one synchronous insert into `link_clicks` through the database pool, dispatched with `run_in_threadpool`. Record only `code` and the database's UTC `now()` timestamp. Catch any analytics-write exception locally, log a fixed warning containing only the short code, and continue; analytics failure must not change the redirect response. **[FR-2, FR-8, NFR-2, FR-13]**
 5. Return HTTP `302` with the stored original URL as `Location`. Do not add a cache initially. **[FR-2, FR-8, NFR-3]**
 
 ## Failure Behavior
@@ -143,6 +155,7 @@ The unique digest index arbitrates concurrent requests for the same exact URL. P
 - **Random code collision:** the unique code constraint rejects the insert; retry with a newly generated code. If a bounded retry policy is exhausted, return `503` and log a sanitized operational error. **[FR-1, NFR-2]**
 - **Rate limit reached:** return `429`; no database write is attempted. **[NFR-1]**
 - **Expired mapping:** retain its row but return `404`. A valid repeated create updates expiry under the stated rule and revives that same code. **[FR-9, A-2, A-3, L-3]**
+- **Click-event write failure:** log a sanitized warning containing the short code only and preserve the `302`; events may be lost. The lookup's existing typed pool/connection/statement failures still return sanitized `503` before the analytics hook. **[FR-2, FR-8, FR-13, NFR-2, NFR-8, L-7]**
 
 ## Rate Limiter
 
@@ -158,6 +171,7 @@ Use an in-process sliding window keyed by direct client IP, storing request time
 - **Limiter tests:** ten requests within a rolling minute are allowed and the next is rejected; old timestamps and inactive IP state are cleaned up; direct peer IP is used rather than forwarded headers. **[NFR-1, L-1, L-6]**
 - **Compose smoke test:** start the one-service PostgreSQL Compose configuration, initialize the schema, run the application, and exercise create and redirect end to end. **[NFR-6]**
 - **Database timeout/pool tests:** verify bounded pool configuration, pool-acquisition timeout, connection timeout handling, statement timeout cancellation/rollback, and sanitized `503` responses. **[NFR-2, NFR-3, NFR-4, NFR-6]**
+- **Click analytics tests:** active redirects attempt one event; malformed, missing, and expired codes attempt none; typed insert failure and a missing event table still produce the original `302` and `Location`; migration upgrade/downgrade preserves `links`. **[FR-2, FR-8, FR-9, FR-13, NFR-2, NFR-8, L-7]**
 - **Performance test:** with a documented machine, dataset, and traffic profile, measure server-side p99 for redirects and creates. Use average redirect load in A-6 (about 100 requests/second) for the NFR-3 pass/fail result, including pool acquisition; measure peak load in A-6 (about 1,000 requests/second) separately and report it without using it as a pass/fail target. Include the expected 100:1 read-to-write ratio from A-5 in the mixed workload where practical. Measure creates under A-7. Benchmark indexed lookup at the expected data scale; if average-load redirect p99 misses 200 ms, evaluate caching as a later change. **[NFR-3, NFR-4, NFR-5, A-4, A-5, A-6, A-7, A-8]**
 
 ## Limitations
@@ -167,7 +181,7 @@ Use an in-process sliding window keyed by direct client IP, storing request time
 - Expired mappings are never deleted, so storage grows over time. **[L-3]**
 - Resubmitting an expiring URL without expiry makes it permanent under the agreed rule. **[L-4]**
 - No cache is present initially; redirect latency depends on PostgreSQL and must be measured. **[NFR-3]**
-- Click analytics are not implemented; only the designated future hook point is retained. **[Out of scope: click analytics]**
+- Click events are best-effort: failures lose events, retries/deduplication and bot filtering are absent, and storage grows without a retention policy. **[FR-13, NFR-2, NFR-8, L-7]**
 - Malicious URL reputation checks are not implemented. **[Out of scope: malicious URL detection]**
 - A SHA-256 collision is not separately checked by design, consistent with the no-full-URL-comparison decision. **[NFR-7]**
 - If deployed behind a proxy while forwarded headers remain untrusted, all requests may appear to come from the proxy's IP and share one rate-limit bucket. **[NFR-1, L-6]**

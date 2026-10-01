@@ -1,6 +1,8 @@
+import logging
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,6 +25,7 @@ from url_shortener.links import (
     Link,
     create_or_reuse_link,
     get_link_by_code,
+    record_link_click,
 )
 from url_shortener.rate_limiter import (
     RATE_LIMIT_MESSAGE,
@@ -35,6 +38,10 @@ from url_shortener.settings import Settings
 from url_shortener.validation import URLValidationError, validate_url
 
 _SHORT_CODE_PATTERN = re.compile(r"[A-Za-z0-9]{7}")
+_CLICK_DATABASE: ContextVar[Database | None] = ContextVar(
+    "click_database", default=None
+)
+_LOGGER = logging.getLogger(__name__)
 
 
 class ErrorDetail(BaseModel):
@@ -201,7 +208,10 @@ def _utc_now() -> datetime:
 
 
 def record_click(link: Link) -> None:
-    del link
+    database = _CLICK_DATABASE.get()
+    if database is None:
+        raise RuntimeError("No database available for click recording.")
+    record_link_click(database, link.code)
 
 
 async def create_short_link(
@@ -436,7 +446,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if link is None or (link.expires_at is not None and link.expires_at <= now):
             return _not_found_response()
 
-        record_click(link)
+        click_database_token = _CLICK_DATABASE.set(request.app.state.database)
+        try:
+            await run_in_threadpool(record_click, link)
+        except Exception:
+            _LOGGER.warning("Click recording failed for short code %s", link.code)
+        finally:
+            _CLICK_DATABASE.reset(click_database_token)
         return RedirectResponse(url=link.original_url, status_code=302)
 
     return application

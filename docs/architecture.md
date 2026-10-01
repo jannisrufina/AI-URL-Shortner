@@ -10,7 +10,7 @@ This document describes the implementation as built. Requirement IDs are from [r
 - **Create service and links module:** `app.create_short_link()` is shared by `POST /api/links` and `POST /`; `links.py` computes the exact-URL SHA-256 digest, performs the upsert, and provides indexed code lookup. **[FR-1, FR-11, FR-12, NFR-2, NFR-7, A-1, A-2, A-3]**
 - **Settings and database:** `settings.py` reads connection, public-base, and pool/timeout values. `database.py` owns the synchronous psycopg pool (default min/max 1/10), 250 ms pool-acquisition wait, 2 s connection timeout, and 1 s statement timeout, and maps pool, operational, and statement-cancel errors to typed failures. Synchronous database calls from async routes use `run_in_threadpool`. **[NFR-2, NFR-3, NFR-4, NFR-6]**
 - **Rate limiter:** an in-process sliding window uses the direct peer IP, allows 10 create attempts per 60 seconds, and periodically sweeps inactive entries. It is shared by JSON and form create routes; redirects do not use it. **[NFR-1, L-1, L-6]**
-- **PostgreSQL:** the only external service and source of truth. The `links` table uses a seven-character Base62 primary key, a 32-byte SHA-256 digest, a unique digest index, and no expiry cleanup or cache. **[FR-1, FR-2, NFR-5, NFR-6, NFR-7, L-3]**
+- **PostgreSQL:** the only external service and source of truth. The `links` table uses a seven-character Base62 primary key and a unique digest index. The append-only `link_clicks` table stores only a code and `clicked_at` timestamp; it has no foreign key to `links` so the benchmark reset can truncate links, and the seeder clears click rows first. No expiry cleanup or cache is used. **[FR-1, FR-2, FR-13, NFR-5, NFR-6, NFR-7, L-3, L-7]**
 - **Docker Compose:** starts PostgreSQL only; the single-worker Python app runs separately. **[NFR-6]**
 
 ### Supporting Tools
@@ -56,11 +56,11 @@ flowchart TD
     DB -->|Pool, connection, or statement failure| S503["503 service_unavailable; never 404"]
     DB -->|Found row| X{"expires_at <= request UTC now?"}
     X -->|Yes| NF
-    X -->|No| H["No-op click-analytics hook"]
-    H --> R["302 with stored URL in Location"]
+    X -->|No| H["Best-effort link_clicks insert via run_in_threadpool"]
+    H -->|Inserted or write failed; warning logs code only| R["302 with unchanged stored URL in Location"]
 ```
 
-The analytics hook runs once only for a found, unexpired link. No cache is used. FastAPI’s documentation routes and fixed `GET /`, `POST /api/links`, and `POST /` routes are registered before the catch-all `GET /{code:path}` route. Unknown GET paths that reach it fail the code-format check and receive the standard JSON 404. **[FR-2, FR-8, FR-9, NFR-2, NFR-5, NFR-6, L-3]**
+The click insert is attempted once only for a found, unexpired link. It stores the code and UTC timestamp, and its failure is caught locally so a valid redirect remains 302. No analytics are written for 404s. No cache is used. FastAPI’s documentation routes and fixed `GET /`, `POST /api/links`, and `POST /` routes are registered before the catch-all `GET /{code:path}` route. Unknown GET paths that reach it fail the code-format check and receive the standard JSON 404. **[FR-2, FR-8, FR-9, FR-13, NFR-2, NFR-5, NFR-6, NFR-8, L-3, L-7]**
 
 ## Key Decisions
 
@@ -81,6 +81,7 @@ The analytics hook runs once only for a found, unexpired link. No cache is used.
 - **L-4:** repeating an expiring URL without expiry makes it permanent.
 - **L-5:** alternate numeric IPv4 forms are not normalized.
 - **L-6:** behind a proxy, clients may share the proxy's direct-IP rate-limit bucket; forwarded headers are not trusted.
+- **L-7:** click events can be lost on failure; there is no deduplication or bot filtering, and the event table grows without a retention policy.
 
 ### Additional Known Gaps (Not in requirements.md)
 
@@ -90,7 +91,7 @@ The analytics hook runs once only for a found, unexpired link. No cache is used.
 - IPv6 clients can rotate source addresses within a `/64` and obtain separate limiter buckets.
 - Numeric shorthand such as `127.1`, CGNAT addresses, and multicast ranges are accepted by the current parser/policy.
 - Unicode internationalized hostnames must be submitted as ASCII punycode; Unicode authority text is rejected.
-- Latency was measured only for the create profile (36 requests from one source address, so its p99 is statistically weak). Redirect latency (NFR-3) was not measured; the harness is built and tested but its redirect profile was not run.
+- The create profile was run once from one source address with 36 requests, so its p99 is statistically weak. The redirect-average profile was not run for acceptance; NFR-3 is not demonstrated at its 100 requests/second target. A lower-rate baseline and saturation runs are recorded by the engineer outside the automated test suite.
 - Seeded benchmark rows use short synthetic URLs (about 38 characters), so the storage extrapolation to 10M rows (about 2.2 GB) understates real table size; index size does not depend on URL length.
 
 ## Deviations from design.md (for review)
@@ -107,6 +108,7 @@ The analytics hook runs once only for a found, unexpired link. No cache is used.
 | Database error handling boundary | Sanitized 503 handling is registered for typed `DatabaseAccessError` and code-generation exhaustion; arbitrary uncaught database exceptions have no broad handler and therefore are not normalized to the design's 503 response. | `url_shortener/app.py`, `url_shortener/database.py` |
 | Retry-exhaustion logging | Design.md calls for a sanitized operational log after code retries exhaust. The handler returns the sanitized 503 but does not log an operational event. | `url_shortener/links.py`, `url_shortener/app.py` |
 | Load measurement scope | The harness measures scheduled-to-response loopback HTTP latency, including generator/client scheduling; it is not an isolated server-side measurement. Its average redirect profile alone sets the NFR-3 verdict; peak and overload are report-only. | `scripts/load_test.py`, `README.md` |
+| Click-event failure handling | Analytics writes are now attempted synchronously before 302 but are best-effort; a local catch preserves 302 on write failure, whereas the initial design described a no-op hook only. | `url_shortener/app.py`, `url_shortener/links.py` |
 
 ### Contradictions with requirements.md
 
