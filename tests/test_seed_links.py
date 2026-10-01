@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, cast
@@ -48,23 +48,29 @@ def test_seeded_rows_are_repeatable_and_seed_changes_random_fields() -> None:
     assert all(row[4].tzinfo is UTC for row in first)
 
 
-def test_expiry_rate_is_approximately_five_percent_and_future() -> None:
+def test_expiry_rate_is_five_percent_and_expiries_are_30_to_365_days_later() -> None:
     rows = list(seeder.iter_rows(20_000, seed=2026))
-    created_at = rows[0][4]
     expired_count = sum(expires_at is not None for _, _, _, expires_at, _ in rows)
 
     assert 900 <= expired_count <= 1_100
     assert all(
-        expires_at is None or expires_at > created_at for _, _, _, expires_at, _ in rows
+        expires_at is None
+        or timedelta(days=30) <= expires_at - created_at <= timedelta(days=365)
+        for _, _, _, expires_at, created_at in rows
     )
 
 
-def test_created_at_is_seed_derived_and_fixed_utc() -> None:
+def test_created_at_is_deterministic_recent_and_fixed_utc() -> None:
     first = list(seeder.iter_rows(2, seed=1))
+    repeated = list(seeder.iter_rows(2, seed=1))
     second = list(seeder.iter_rows(2, seed=2))
+    created_at = first[0][4]
+    anchor = datetime(2026, 9, 1, tzinfo=UTC)
 
-    assert first[0][4] == datetime(2000, 1, 1, 0, 0, 1, tzinfo=UTC)
-    assert second[0][4] != first[0][4]
+    assert created_at == repeated[0][4]
+    assert second[0][4] != created_at
+    assert created_at.tzinfo is UTC
+    assert anchor <= created_at < anchor + timedelta(days=1)
 
 
 def test_sample_codes_are_deterministic_and_contain_no_urls(tmp_path: Path) -> None:
@@ -76,6 +82,19 @@ def test_sample_codes_are_deterministic_and_contain_no_urls(tmp_path: Path) -> N
     assert written == 5
     assert lines == [seeder.code_for_index(index * 20 // 5) for index in range(5)]
     assert all("https://" not in line for line in lines)
+
+
+def test_sample_codes_count_larger_than_dataset_writes_all_codes(
+    tmp_path: Path,
+) -> None:
+    sample_path = tmp_path / "all-codes.txt"
+
+    written = seeder.write_sample_codes(sample_path, count=3, sample_count=10)
+
+    assert written == 3
+    assert sample_path.read_text(encoding="ascii").splitlines() == [
+        seeder.code_for_index(index) for index in range(3)
+    ]
 
 
 def test_database_name_must_be_explicit() -> None:

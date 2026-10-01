@@ -109,13 +109,18 @@ docker compose exec -T postgres createdb -U url_shortener url_shortener_bench
 $env:DATABASE_URL = "postgresql://url_shortener:replace-with-a-local-password@localhost:5432/url_shortener_bench"
 $env:BENCH_DATABASE_URL = $env:DATABASE_URL
 python -m alembic upgrade head
+
+# Smoke seed (10,000 rows) to confirm the tool works:
 python -m scripts.seed_links --count 10000 --seed 1
-python -m scripts.seed_links --count 1000000 --seed 1 --sample-codes-file sample-codes.txt
-# Optional 10M scale seed; explicitly opt in and confirm destructive reset only if needed.
-python -m scripts.seed_links --count 10000000 --seed 1 --allow-large --reset --confirm-database url_shortener_bench --sample-codes-file sample-codes-10m.txt
-```
 
-`BENCH_DATABASE_URL` is used by the seeder; it never falls back to
-`DATABASE_URL`. Resetting requires `--reset --confirm-database
-url_shortener_bench`. The sample file contains short codes only.
+# Recommended scale-up (1,000,000 rows). It replaces the smoke data, so it
+# needs an explicit reset:
+python -m scripts.seed_links --count 1000000 --seed 1 --reset --confirm-database url_shortener_bench --sample-codes-count 10000 --sample-codes-file sample-codes.txt
 
+# Optional 10M scale seed; same explicit opt-in, and only if needed:
+python -m scripts.seed_links --count 10000000 --seed 1 --allow-large --reset --confirm-database url_shortener_bench --sample-codes-count 10000 --sample-codes-file sample-codes-10m.txt
+
+The commands above leave `DATABASE_URL` pointing at the benchmark database for
+the rest of that PowerShell window. Use a separate window for benchmarking, or
+set `DATABASE_URL` back to the main database before running the app or the
+tests. The generated `sample-codes*.txt` files are ignored by git.

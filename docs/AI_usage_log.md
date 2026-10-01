@@ -2960,3 +2960,301 @@ Tests (tests/test_seed_links.py; all must pass):
 Constraints: all four quality gates pass (python scripts/check.py) plus pytest;
 no global suppressions; no new dependencies. The suite has 195 tests; report
 the new count. List every file created or changed and any decision to review.
+
+#### Response:
+Files I expect to change: `README.md` and `test_database_integration.py`. I expect to create scripts/seed_links.py and tests/test_seed_links.py. I’ll read Task 10, the specified requirements/design/schema and DB settings, plus the existing integration fixture before writing code. I will not run the seeder CLI or perform any non-rolled-back seed.
+
+Ran terminal command: git status --short
+
+Read , lines 185 to 245
+
+Read , lines 1 to 140
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read , lines 15 to 80
+
+The current test fixture applies Alembic migrations and skips unless `REQUIRE_DB=1`, so the rollback integration test can live alongside it without moving fixtures or changing app/schema code. The seeder design will stream deterministic row batches into `COPY` inside nested transactions; in the integration test, an enclosing transaction will deliberately abort after assertions so none of its 1,000 rows persist. I’m checking Task 10’s exact acceptance text before the first edit.
+
+Searched for text `## 10. Add a performance data seeder` (`**/docs/tasks.md`), 1 result
+
+Read , lines 90 to 100
+
+Read 
+
+Read , lines 164 to 190
+
+The implementation will expose a pure `iter_rows()` for deterministic unit checks and `seed_links()` for batch COPY, with nested transaction contexts so CLI batches commit individually while the integration test’s outer transaction can roll them all back. CLI guards will be isolated in option-validation/orchestration code, and output will contain only the parsed database name, counts, timings, and size metrics. I’m creating the seeder and focused tests now.
+
+Generating patch (552 lines) in , 
+
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_seed_links.py -q
+Completed with input: & .\.venv\Scripts\python.exe -m pytest tests/test_seed_links.py -q
+
+The first unit run found one CLI usability/test mismatch: the non-empty-table guard exits safely but currently reports only `ValueError`, not a clear fixed refusal message. I’m correcting that specific refusal path and adding explicit checks that each COPY batch gets its own transaction and that a confirmed reset issues `TRUNCATE`; then I’ll rerun the same focused tests.
+
+Generating patch (106 lines) in , 
+
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_seed_links.py -q
+
+The unit slice passes (`16 passed`), including 100,001 unique Base62 codes, digest correctness, deterministic/random-field behavior, expiry proportion, CLI safeguards, sanitized output, and per-batch transaction counts. I’m now adding one integration test that forces an outer rollback around real `COPY`, and the README instructions for the dedicated benchmark database, smoke seed, recommended 1M seed, and optional 10M run.
+
+Generating patch (98 lines) in , 
+
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_database_integration.py -k seed_links_accepts_real_schema_and_rolls_back -q
+
+The rollback test is registered and respects the fixture; it skipped locally because no `TEST_DATABASE_URL` is set, and I have not run the seeder CLI. I spotted two README usability issues before final checks: the sample-code directory wasn’t created, and the optional 10M command follows a non-empty 1M run without the required confirmed reset. I’m correcting those and adding total bytes per row to the report.
+
+Generating patch (25 lines) in , 
+
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_seed_links.py -q
+
+The README commands now include an explicit confirmation/reset for replacing the recommended 1M dataset with 10M, and the report separates table and total bytes per row. The focused seeder tests remain green (`16 passed`); I’m running the complete suite and quality gates now.
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+
+Ran terminal command: git diff --check
+
+Checked , , , no problems found
+
+Read , lines 1 to 320
+
+The gates found a mypy module-identity issue: without a package initializer, `seed_links.py` is seen once as `seed_links` and again as `scripts.seed_links` from the integration test. I’m adding `scripts/__init__.py` so both resolve consistently, and applying the reported safe lint/format corrections; that adds one small file to the original list.
+
+Generating patch (102 lines) in , , , 
+
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_seed_links.py -q
+
+The package identity fix is in place, and all 16 seeder unit tests still pass. I’ve also preserved the rollback test’s semantics while combining its contexts; next I’m formatting the touched files and rerunning the full suite and all gates.
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m ruff format scripts/__init__.py scripts/seed_links.py tests/test_seed_links.py tests/test_database_integration.py
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+
+Ran terminal command: git diff --check
+
+Checked , , , , no problems found
+
+The full suite still passes (`184 passed, 28 skipped`), but the final check found mypy/Ruff issues in test doubles and import/context style—not seeder behavior. I’m reading the exact current lines before fixing them; the main type concerns are the connection fake, test-option dict typing, and module-level monkeypatch target.
+
+Read , lines 75 to 145
+
+Read , lines 95 to 350
+
+Read , lines 1 to 40
+
+Generating patch (93 lines) in , , 
+
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_seed_links.py -q
+
+The seeder tests remain green (`16 passed`) after replacing the test-double suppression with a local type cast and making `database_name()`’s type check explicit. I’ve also consolidated the transaction, cursor, and COPY contexts so one batch still maps to one transaction; I’m rerunning static gates on these corrections.
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m ruff format scripts/seed_links.py tests/test_seed_links.py tests/test_database_integration.py
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+Completed with input: & .\.venv\Scripts\python.exe scripts/check.py
+
+The second gate run narrowed the remaining failures to one untyped test-options dictionary and one import-order correction; implementation types now pass mypy. I’m replacing that dictionary with explicit typed arguments and sorting imports, then rerunning `check.py`.
+
+Generating patch (45 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+
+All four quality gates now pass. One last usability improvement before final verification: the sample-code writer currently takes the first N rows, which biases Task 11’s redirect sample toward the start of the generated key range. I’m changing it to deterministic, evenly spaced row indexes across the dataset and updating its unit assertion.
+
+Generating patch (18 lines) in , 
+
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_seed_links.py -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m ruff format scripts/seed_links.py tests/test_seed_links.py
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+
+Ran terminal command: git diff --check
+
+Ran terminal command: git status --short
+
+The final tree has **184 passed, 28 skipped (212 tests)** and all quality gates pass; the skipped cases are PostgreSQL integration tests because the fixture URL is unset. One final reporting detail: I’m making index and non-index overhead explicit per row as well as in the 10M projections, so the A-8 comparison separates all storage components clearly.
+
+Generating patch (27 lines) in , 
+
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_seed_links.py -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m ruff format scripts/seed_links.py tests/test_seed_links.py
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+
+Ran terminal command: git diff --check
+
+Ran terminal command: git status --short
+
+Added the deterministic COPY seeder with per-batch transactions, CLI-only database safeguards, storage reporting, and evenly spaced sample-code output. The README now documents benchmark database setup, the 10k smoke seed, recommended 1M seed, and optional confirmed 10M reset.
+
+**Files**
+Changed: `README.md`, `test_database_integration.py`.
+
+Created: `__init__.py`, `seed_links.py`, `test_seed_links.py`.
+
+The existing `AI_usage_log.md` edit was left untouched.
+
+**Verification**
+All quality gates pass. Pytest reports **184 passed, 28 skipped: 212 tests total**. PostgreSQL integration tests skipped because `TEST_DATABASE_URL` is unset. I did not run the seeder CLI or seed any database.
+
+One decision to review: the A-8 “5 GB” comparison uses decimal units, or 5,000,000,000 bytes.
+
+Made changes.
+
+### Prompt:
+Task 10 follow-up. Only change scripts/seed_links.py, tests/test_seed_links.py,
+and README.md. Do not modify anything under url_shortener/, alembic/, or
+docs/. Do not run the seeder or touch any database. Do not commit or push.
+
+Problem: created_at is pinned near the year 2000, so every generated
+expires_at is in the past today. About 5% of rows would already be expired, and
+any Task 11 redirect test that reads codes from the sample file would get 404s
+for about 5% of requests, which would make the latency numbers misleading.
+
+Fix in scripts/seed_links.py:
+- Derive created_at from the seed relative to a fixed recent anchor:
+  2026-09-01T00:00:00Z plus (seed % 86400) seconds. Keep it deterministic:
+  the same seed always gives the same created_at.
+- Make expires_at, for the ~5% of rows that have one, between 30 and 365 days
+  after created_at (chosen by the seeded random.Random), so those rows stay
+  active for the next several months.
+- Keep everything else unchanged: code generation, digests, URLs, batching,
+  guards, and the report.
+
+Update tests/test_seed_links.py:
+- Replace the assertion that created_at equals 2000-01-01T00:00:01Z with:
+  created_at is deterministic for a given seed, differs between seeds, is
+  timezone-aware UTC, and falls within 2026-09-01 through 2026-09-02.
+- Rename test_expiry_rate_is_approximately_five_percent_and_future and make
+  it assert that every generated expiry is between 30 and 365 days after that
+  row's created_at, and that about 5% of 20,000 rows have an expiry (900 to
+  1,100, as now).
+- Add: write_sample_codes with sample_count greater than count writes exactly
+  count codes.
+
+README: add one sentence to the seeding section: "A failed load leaves a
+partial table; rerun with --reset and --confirm-database." Use the actual flag
+name --sample-codes-count wherever the sample size is mentioned.
+
+All four quality gates and pytest must pass (python scripts/check.py). The
+suite currently has 212 tests; report the new count. List every file changed
+and any decision I should review.

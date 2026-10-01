@@ -25,9 +25,10 @@ DEFAULT_SAMPLE_COUNT = 10_000
 LARGE_COUNT_LIMIT = 2_000_000
 TEN_MILLION_ROWS = 10_000_000
 FIVE_GB_BYTES = 5_000_000_000
-_CREATED_AT_EPOCH = datetime(2000, 1, 1, tzinfo=UTC)
-_CREATED_AT_PERIOD_SECONDS = 50 * 365 * 24 * 60 * 60
-_EXPIRY_PERIOD_SECONDS = 365 * 24 * 60 * 60
+_CREATED_AT_ANCHOR = datetime(2026, 9, 1, tzinfo=UTC)
+_CREATED_AT_PERIOD_SECONDS = 24 * 60 * 60
+_MIN_EXPIRY_SECONDS = 30 * 24 * 60 * 60
+_MAX_EXPIRY_SECONDS = 365 * 24 * 60 * 60
 _COPY_LINKS_SQL = """
 COPY links (code, url_digest, original_url, expires_at, created_at)
 FROM STDIN
@@ -60,7 +61,7 @@ def code_for_index(index: int) -> str:
 
 def iter_rows(count: int, seed: int) -> Iterator[SeedRow]:
     generator = random.Random(seed)
-    created_at = _CREATED_AT_EPOCH + timedelta(
+    created_at = _CREATED_AT_ANCHOR + timedelta(
         seconds=seed % _CREATED_AT_PERIOD_SECONDS
     )
 
@@ -70,7 +71,7 @@ def iter_rows(count: int, seed: int) -> Iterator[SeedRow]:
         expires_at = None
         if generator.randrange(20) == 0:
             expires_at = created_at + timedelta(
-                seconds=generator.randint(1, _EXPIRY_PERIOD_SECONDS)
+                seconds=generator.randint(_MIN_EXPIRY_SECONDS, _MAX_EXPIRY_SECONDS)
             )
         yield (
             code_for_index(index),
