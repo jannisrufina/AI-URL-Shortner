@@ -8,9 +8,9 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 - **Security practices:** no secrets or credentials in prompts; `.env` is ignored and only placeholder values are committed; the assignment text was shared once with the planning chat (Claude) to understand requirements and was not given to Copilot; every AI change was reviewed, tested, and run through the quality gates before I relied on it.
 - **Stages so far:**
   - Planning: requirements, design, tasks
-  - Tasks 1 to 9: quality gates and CI, architecture overview, app bootstrap, URL validation, create limiter, create API, redirects, create form, end-to-end tests
-  - Next: Task 10 (performance data seeder)
-  - Still to do: Task 11 (load tests), Task 12 (reconcile the architecture doc), Task 13 (OpenAPI export), Task 14 (setup instructions), Tasks 15 and 16 (the two scenarios), Task 17 (final summary)
+  - Tasks 1 to 10: quality gates and CI, architecture overview, app bootstrap, URL validation, create limiter, create API, redirects, create form, end-to-end tests, performance data seeder
+  - Next: [Task 12 (reconcile the architecture doc), then Task 14 (setup instructions)]
+  - Still to do: Task 11 (load tests), Task 13 (OpenAPI export), Tasks 15 and 16 (the two scenarios), Task 17 (final summary)
 
 ## Decisions (what the AI proposed, what I chose, why)
 
@@ -52,6 +52,10 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | D-34 | How Task 9 found gaps (Task 9) | The AI built a requirement-to-test matrix first, with a strict column for "real HTTP request against PostgreSQL" | Accepted; it then added 10 integration tests for the gaps (combined create, redirect, and form flow; API-set expiry; HTTP rate limiting with forwarded headers; exact-URL identity; URL policy rejections; missing and malformed codes; form escaping) | The matrix is an honest answer to "what is tested end to end", and it feeds the final summary's traceability |
 | D-35 | Test file housekeeping (Task 9) | All integration tests live in `tests/test_database_integration.py` (about 600 lines) | Left as one file | Splitting by concern is cosmetic and not worth deadline time |
 | D-36 | Documented test command (Task 9) | `python -m pytest -m "not performance"` with `REQUIRE_DB=1` | [Kept as is / changed to plain `python -m pytest` until Task 11 registers a performance marker] | `--strict-markers` is on, so a marker has to be registered when performance tests exist |
+| D-37 | Seeder safety design (Task 10) | Guards live in the CLI only: the target database name must end in `_bench`; the seeder reads `BENCH_DATABASE_URL` and never falls back to `DATABASE_URL`; `--reset` requires `--confirm-database` with the exact name; counts above 2,000,000 require `--allow-large`; output never prints URLs, the connection string, or the password | Accepted | A benchmark load must not be able to touch the main or test database by accident |
+| D-38 | Row generation (Task 10) | Codes come from a bijection (index times 37 modulo 62^7, so every code is unique); synthetic `https://bench.example/...` URLs; SHA-256 digest of the exact URL bytes; a seeded `random.Random` picks the ~5% of rows with an expiry | Accepted | Deterministic, repeatable data that satisfies the real schema constraints and never needs normalization |
+| D-39 | Timestamps in seeded rows (Task 10) | `created_at` pinned near the year 2000 | Changed (AI follow-up at my request): `created_at` is 2026-09-01 plus `seed % 86400` seconds, and expiries are 30 to 365 days later [or 90 to 365 if you made the optional edit] | Rows with an expiry must still be active when the load test runs (E-30) |
+| D-40 | Benchmark scale (Task 10) | 10M rows named as the target | Measured at 1,000,000 rows; 10M extrapolated, not run | Time and disk; the per-row sizes scale linearly, and the load took 11.8 seconds for 1M |
 
 ## AI errors and gaps I caught
 
@@ -86,6 +90,9 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | E-27 | Task 8: the form tests had no check that the JSON API still returns JSON after the form changed the global handlers (the main risk), and the XSS test did not check that a quote cannot close an attribute | Second-AI review of the test file | Added a JSON-stays-JSON test and stricter XSS assertions (my edits), plus file-upload and invalid-bytes tests |
 | E-28 | Task 9: the AI wrote 10 new integration tests but could not run any of them (27 skipped; no database in its shell), so its report could not show that they pass. Third time the same limit appeared (E-12, E-26) | The AI's own report; I treated the skips as unverified | I ran them against my test database with `REQUIRE_DB=1`, twice: 195 passed, 0 skipped; CI [green, run number] |
 | E-29 | Task 9: the log-capture test only sees Python application logging, so it cannot show Uvicorn's own access log is clean | Second-AI review of the test | Recorded as a limit: the access log records request paths (short codes) and not request bodies; no change to the test |
+| E-30 | Task 10: seeded rows had `created_at` in the year 2000, so every generated expiry was already in the past (about 5% of rows); the test named "...and_future" passed because it compared each expiry with its own row's `created_at`. Benchmark redirects for those codes would have returned 404 | Second-AI review of the code and tests | Follow-up prompt with a 2026 anchor and 30 to 365 day expiries; after seeding, `SELECT ... WHERE expires_at <= now()` returned 0 (480 of 10,000 rows have an expiry) |
+| E-31 | Task 10: the README ran the 1M seed right after the 10K seed with no `--reset`, so a reader following it in order would be refused ("links table is not empty") | Second-AI review of the README | Rewrote the command block: smoke seed, then the 1M seed with `--reset --confirm-database`; added a note that `DATABASE_URL` stays pointed at the benchmark database for that window (my edit) |
+| E-32 | Task 10: the AI could not run the seeder or the 28 integration tests (including the rollback test), as in Tasks 3, 7, and 9 (E-12, E-26, E-28) | The AI's own report | I ran them: 213 passed, 0 skipped; the rollback test left 0 rows in the test database; I ran the 10K and 1M seeds and the guards myself |
 
 ## Planning
 ### Prompt: 
@@ -3258,3 +3265,5 @@ name --sample-codes-count wherever the sample size is mentioned.
 All four quality gates and pytest must pass (python scripts/check.py). The
 suite currently has 212 tests; report the new count. List every file changed
 and any decision I should review.
+
+#### Response:
