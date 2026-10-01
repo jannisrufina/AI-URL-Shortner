@@ -281,3 +281,33 @@ This keeps the ambiguity exercise in the “clarify the meaning and the minimal 
 ## 6) Summary
 
 The requirement is ambiguous because “reliable” could mean availability, correctness under failure, durability, degradation behavior, observability, performance, deploy safety, or abuse resilience. The current service already enforces a narrow baseline: bounded PostgreSQL pool behavior, typed database failures, sanitized `503` responses, rate limiting, and best-effort click processing. The right next step is not to pick a single meaning by default, but to answer the questions above and then choose the smallest slice that matches the intended definition.
+
+## 7) Engineer clarification (supplied by me)
+
+I am not accepting the AI's recommended slice. It restates reliability behavior the service already has (bounded pool, timeouts, sanitized 503s) and defines no testable deliverable.
+
+**My answers**
+- Q1: the failure to survive is a PostgreSQL outage or missing schema, and an operator or orchestrator being unable to tell the app is unhealthy.
+- Q2: operational resilience: a way to tell "the process is up" from "the service can serve requests".
+- Q3: correctness under failure first. Latency targets stay as in the existing NFRs.
+- Q4: inside the current single-process app and PostgreSQL boundary. No orchestrator or multi-instance assumptions.
+- Q5: minimal: two health endpoints, no metrics or tracing stack.
+- Q6: no new abuse controls.
+- Q7: yes, a small slice is acceptable.
+- Q8: neither create nor redirect; this is a new operational endpoint pair.
+
+**Chosen slice: liveness and readiness endpoints**
+- `GET /livez`: returns 200 `{"status":"ok"}` with no database access.
+- `GET /readyz`: runs `SELECT 1 FROM links LIMIT 1` through the existing pool, with the existing pool wait and statement timeout. Returns 200 `{"status":"ok"}` on success. On a database failure it returns the existing standard 503 body (`service_unavailable`). A missing `links` table (migration not applied) also counts as not ready.
+- Both are registered before the catch-all `GET /{code:path}`, are not rate limited, record no click, and expose no connection details or error text.
+- Paths are `/livez` and `/readyz`, not `/healthz`: `healthz` is exactly seven letters and would be a valid short code.
+
+**Acceptance criteria**
+- `/livez` returns 200 even when the database is unreachable.
+- `/readyz` returns 200 with a healthy database, 503 with the standard error body on injected pool, connection and statement failures, and 503 when `links` is missing.
+- Neither route is shadowed by the catch-all, and a 7-character code still redirects as before.
+- `docs/openapi.json` is regenerated and the drift test passes.
+- Docs updated (new FR-14, design, architecture, README); no existing test is weakened.
+
+**Out of scope**
+Retries, circuit breakers, metrics, alerting, multi-instance behavior, startup behavior when PostgreSQL is down, the retry-exhaustion log gap, and any change to existing routes. The last two are documented known gaps, not part of this slice.

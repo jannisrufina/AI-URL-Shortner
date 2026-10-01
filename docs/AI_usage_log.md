@@ -78,6 +78,7 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | D-61 | Seeder `--reset` truncates `link_clicks` before `links`, in the same transaction. | Without a foreign key either order works technically; clearing events with the data keeps benchmark runs comparable. A test pins the order. |
 | D-62 | One best-effort insert per eligible redirect, with no retry. Keep the synchronous design; async queueing is future work. | A retry after an ambiguous failure could double count. Loss is documented in L-7 and the redirect is never failed. |
 | D-63 | Report NFR-3 as not met in the README, architecture doc and final summary. | Review found docs saying "not measured", but the 100/s run was measured and failed. |
+| D-64 | Rejected the AI's recommended Task 16 slice and supplied my own clarification: `/livez` and `/readyz`. | The AI's slice repeated built behavior and had no testable deliverable. Health endpoints are small, testable, and tie to the missing-schema problem I hit in Task 15. |
 
 ## Errors and gaps I caught (AI's and my own)
 
@@ -138,6 +139,7 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | E-54 | My review: the design DDL had an unnamed CHECK while the migration named it `link_clicks_code_format`, and the second migration was not mentioned. | Aligned the DDL and added the sentence. |
 | E-55 | My review: docs called the write best-effort but omitted that a failing write can delay the 302 by up to the 250 ms pool wait or the 1 s statement timeout. | Added to L-7, design and architecture. |
 | E-56 | My own slip: the first after-run measured the failure path because the bench DB had not been migrated. | Caught by reading the server window ("Click recording failed" on every request); confirmed with `alembic_version` and `\d link_clicks`; applied `alembic upgrade head`, truncated `link_clicks` and repeated the run. |
+| E-58 | Task 16 analysis: the recommended slice restated already-built reliability behavior, ignored the documented gaps in the architecture deviations table, and attributed design.md behavior to requirements.md. | Compared the memo against requirements.md and architecture.md; wrote my own clarification and corrected the attributions. |
 
 ## Planning
 ### Prompt: 
