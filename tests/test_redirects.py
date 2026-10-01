@@ -55,6 +55,91 @@ def test_dynamic_get_route_does_not_shadow_fastapi_docs(
     assert openapi.status_code == 200
 
 
+def test_livez_returns_ok_without_database_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _client(monkeypatch) as client:
+        response = client.get("/livez", follow_redirects=False)
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    assert response.headers["cache-control"] == "no-store"
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_body"),
+    [
+        (
+            DatabasePoolTimeoutError("pool unavailable"),
+            {
+                "error": {
+                    "code": "service_unavailable",
+                    "message": "The service is temporarily unavailable.",
+                }
+            },
+        ),
+        (
+            DatabaseConnectionError("connection unavailable"),
+            {
+                "error": {
+                    "code": "service_unavailable",
+                    "message": "The service is temporarily unavailable.",
+                }
+            },
+        ),
+        (
+            DatabaseStatementTimeoutError("statement timed out"),
+            {
+                "error": {
+                    "code": "service_unavailable",
+                    "message": "The service is temporarily unavailable.",
+                }
+            },
+        ),
+    ],
+)
+def test_readyz_returns_sanitized_503_for_typed_db_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+    expected_body: dict[str, dict[str, str]],
+) -> None:
+    monkeypatch.setattr(
+        app_module,
+        "_readyz_query",
+        lambda _database: (_ for _ in ()).throw(error),
+    )
+    with _client(monkeypatch) as client:
+        response = client.get("/readyz", follow_redirects=False)
+
+    assert response.status_code == 503
+    assert response.json() == expected_body
+    assert response.headers["cache-control"] == "no-store"
+    assert "pool unavailable" not in response.text
+    assert "connection unavailable" not in response.text
+    assert "statement timed out" not in response.text
+
+
+def test_health_routes_are_not_short_codes_and_a_valid_code_still_redirects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    link = Link("AbC1234", "https://example.test/path", None)
+
+    def lookup(_database: Any, code: str) -> Link:
+        assert code == "AbC1234"
+        return link
+
+    monkeypatch.setattr(app_module, "_readyz_query", lambda _database: None)
+    with _client(monkeypatch, lookup) as client:
+        livez = client.get("/livez", follow_redirects=False)
+        readyz = client.get("/readyz", follow_redirects=False)
+        redirect = client.get("/AbC1234", follow_redirects=False)
+
+    assert livez.status_code == 200
+    assert readyz.status_code == 200
+    assert redirect.status_code == 302
+    assert redirect.headers["location"] == "https://example.test/path"
+
+
 @pytest.mark.parametrize(
     ("original_url", "expected_location"),
     [

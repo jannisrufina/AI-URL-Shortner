@@ -19,9 +19,11 @@ def test_openapi_has_only_expected_paths_and_methods() -> None:
     spec = generate_spec()
     paths = spec["paths"]
 
-    assert set(paths) == {"/", "/api/links", "/{code}"}
+    assert set(paths) == {"/", "/api/links", "/livez", "/readyz", "/{code}"}
     assert {method for method in paths["/"]} == {"get", "post"}
     assert set(paths["/api/links"]) == {"post"}
+    assert set(paths["/livez"]) == {"get"}
+    assert set(paths["/readyz"]) == {"get"}
     assert set(paths["/{code}"]) == {"get"}
 
 

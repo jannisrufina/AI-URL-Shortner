@@ -166,6 +166,56 @@ def test_schema_constraints_reject_invalid_rows(database_url: str) -> None:
             _insert(connection, duplicate_code, _digest())
 
 
+def test_readyz_returns_ok_for_a_healthy_database(database_url: str) -> None:
+    settings = _base_settings(database_url)
+    before = 0
+    with psycopg.connect(database_url) as connection:
+        before_row = connection.execute("SELECT count(*) FROM link_clicks").fetchone()
+        before = before_row[0] if before_row is not None else 0
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/readyz", follow_redirects=False)
+
+    with psycopg.connect(database_url) as connection:
+        after_row = connection.execute("SELECT count(*) FROM link_clicks").fetchone()
+        after = after_row[0] if after_row is not None else 0
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    assert response.headers["cache-control"] == "no-store"
+    assert after == before
+
+
+def test_readyz_missing_table_returns_503_and_only_logs_exception_name(
+    database_url: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = _base_settings(database_url)
+    hidden_table_name = "links_hidden_for_readiness_test"
+
+    with caplog.at_level(logging.WARNING), TestClient(create_app(settings)) as client:
+        with psycopg.connect(database_url) as connection:
+            connection.execute(f'ALTER TABLE links RENAME TO "{hidden_table_name}"')
+        try:
+            response = client.get("/readyz", follow_redirects=False)
+        finally:
+            with psycopg.connect(database_url) as connection:
+                connection.execute(f'ALTER TABLE "{hidden_table_name}" RENAME TO links')
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": {
+            "code": "service_unavailable",
+            "message": "The service is temporarily unavailable.",
+        }
+    }
+    assert response.headers["cache-control"] == "no-store"
+    assert "Readiness check failed (UndefinedTable)" in caplog.text
+    assert "UndefinedTable" in caplog.text
+    assert "SELECT 1 FROM links LIMIT 1" not in caplog.text
+    assert "password" not in caplog.text.lower()
+
+
 def test_pool_exhaustion_has_database_error_type(database_url: str) -> None:
     settings = _base_settings(
         database_url,

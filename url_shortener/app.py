@@ -238,6 +238,11 @@ async def create_short_link(
     )
 
 
+def _readyz_query(database: Database) -> None:
+    with database.connection() as connection:
+        connection.execute("SELECT 1 FROM links LIMIT 1").fetchone()
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -404,6 +409,59 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         result = await create_short_link(request, submitted_url, expiry_value)
         return _render_form(request, short_url=result.short_url)
+
+    @application.get(
+        "/livez",
+        summary="Liveness check",
+        responses={
+            200: {
+                "description": "Service is running.",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "type": "object",
+                            "properties": {"status": {"type": "string"}},
+                        }
+                    }
+                },
+            },
+            503: {"model": Error, "description": "Service temporarily unavailable."},
+        },
+    )
+    async def livez() -> JSONResponse:
+        return JSONResponse({"status": "ok"}, headers={"Cache-Control": "no-store"})
+
+    @application.get(
+        "/readyz",
+        summary="Readiness check",
+        responses={
+            200: {
+                "description": "Service can run a query against links.",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "type": "object",
+                            "properties": {"status": {"type": "string"}},
+                        }
+                    }
+                },
+            },
+            503: {"model": Error, "description": "Service temporarily unavailable."},
+        },
+    )
+    async def readyz(request: Request) -> JSONResponse:
+        try:
+            await run_in_threadpool(_readyz_query, request.app.state.database)
+        except Exception as exc:  # pragma: no cover - exercised by tests.
+            _LOGGER.warning("Readiness check failed (%s)", exc.__class__.__name__)
+            response = _error_response(
+                503,
+                "service_unavailable",
+                "The service is temporarily unavailable.",
+            )
+            response.headers["Cache-Control"] = "no-store"
+            return response
+        return JSONResponse({"status": "ok"}, headers={"Cache-Control": "no-store"})
 
     # Register any future fixed GET paths before this dynamic route.
     @application.get(

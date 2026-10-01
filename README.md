@@ -132,6 +132,20 @@ choosing any platform override.
    A correct result includes `code`, `short_url`, and `expires_at`; the `curl`
    request to that short URL receives HTTP 302 with a `Location` header.
 
+## Health checks
+
+When the app is running, probe the health endpoints without the create limiter or
+analytics behavior:
+
+```powershell
+curl.exe -i http://127.0.0.1:8000/livez
+curl.exe -i http://127.0.0.1:8000/readyz
+```
+
+A correct result is HTTP 200 and JSON `{"status": "ok"}` for both. The
+`/readyz` endpoint runs `SELECT 1 FROM links LIMIT 1` through the pool; if the
+query cannot run, it returns the standard sanitized 503 response.
+
 ## Common Problems
 
 - **`No module named ...`:** the virtual environment is not active. Activate it

@@ -12,6 +12,7 @@ FR-10: Provide a single-page create form at `/`. Escape user-provided and genera
 FR-11: Use the configured public short-URL base URL, supplied through an environment variable, when constructing short URLs.
 FR-12: A successful create returns 200 for both new and reused links.
 FR-13: For each redirect to a found, unexpired link, attempt to record one click event containing the short code and a UTC timestamp. Analytics persistence is best-effort and must not change the redirect response.
+FR-14: Provide GET /livez, which returns 200 without database access, and GET /readyz, which returns 200 only when the service can run a query against the links table through the connection pool and otherwise returns the standard 503 response. Neither endpoint is rate limited or records analytics.
 
 # Non-functional requirements:
 NFR-1: Limit creates to 10 per minute per direct client IP. Enforce the limit in application-process memory, without trusting proxy headers, and return HTTP 429 when exceeded.

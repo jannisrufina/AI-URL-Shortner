@@ -100,6 +100,12 @@ Success response:
 
 `GET /{code}` returns HTTP `302` with `Location: <original_url>` for a present, unexpired mapping. Missing and expired codes return HTTP `404`. **[FR-2, FR-8, FR-9]**
 
+### Health checks
+
+`GET /livez` returns HTTP `200` with `{"status": "ok"}` and never touches the database; it is used to confirm the app process is alive.
+
+`GET /readyz` runs `SELECT 1 FROM links LIMIT 1` through the existing PostgreSQL pool and returns HTTP `200` with `{"status": "ok"}` when the query succeeds. If the pool cannot provide a connection, the connection fails, the statement times out, or the `links` table is missing, it returns the standard sanitized `503` error body used elsewhere. The readiness path logs only the exception class name (`Readiness check failed (UndefinedTable)`, for example), never a URL, SQL, or connection detail. The endpoints are not rate limited, do not record click analytics, and are registered before the dynamic redirect route so they cannot be mistaken for short codes. **[FR-14, NFR-2, NFR-6]**
+
 ### Errors
 
 JSON endpoints use this error shape; HTML form submissions render an escaped error message with the corresponding status.
