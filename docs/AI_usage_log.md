@@ -69,6 +69,9 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | D-51 | Local versus deployment base URL (Task 14) | The quick start sets `PUBLIC_BASE_URL` to `http://127.0.0.1:8000` | Accepted; the README says a deployment sets the public hostname chosen for it | Returned short links are clickable on a local run; `jrb.sh` is the hostname the self-reference check was designed around |
 | D-52 | How the README states results (Task 14) | The limitations section says plainly that the redirect load profile was not run (NFR-3 not measured) and that the create profile ran once from one source address with 36 requests, so its p99 is statistically weak | Accepted | No claim in the README goes beyond what was measured |
 | D-53 | Repository address in the README (Task 14) | The AI read the clone URL from my git remote, so it contains my GitHub username | [Kept, because the repository is meant to be cloned / replaced with a placeholder] | [reason] |
+| D-55 | Take a baseline redirect measurement on the unchanged code before Task 15 phase B, and fix the pass/fail threshold before any code changes. | A before/after comparison is only meaningful if the threshold isn't chosen after seeing the result. |
+| D-56 | Use the 25/s × 30 s run as the official baseline: 750/750 returned 302, 0 errors, p50 14.8 ms, p95 40.3 ms, p99 51.8 ms, max 62.0 ms, not generator-limited, PASS. | It was the only run that was clean under the harness's own criteria. The 50/s × 30 s run (p99 47.2 ms) was generator-limited, so it is kept only as a secondary data point. |
+| D-57 | Task 15 regression threshold: all 302, 0 errors, not generator-limited, p99 < 200 ms, and p99 ≤ max(1.5 × 51.8, 51.8 + 10) = 77.8 ms. Rerun once before concluding a regression. | The baseline p99 comes from 750 samples only, and runs differed by about 5 ms in the "wrong" direction, so there is noise. |
 
 ## Errors and gaps I caught (AI's and my own)
 
@@ -117,6 +120,9 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | E-41 | Task 14: the README said step 6 "ends with the initial migration applied", but Alembic prints nothing on success here, so a new reader could not tell whether it worked; the "Common Problems" paths for the virtual environment were missing the leading dot (`\.venv\...`); the AI's first rewrite dropped the lock-regeneration steps and the quality-gate probe table, and when it restored them, two blocks were duplicated; nothing said that only Docker Compose reads `.env` or that `pip-audit` needs an internet connection | Second-AI review of the README, [and the clean-checkout test] | Replaced the expected result with a `\d links` check; fixed both paths; removed the duplicate blocks; added the `.env` sentence and the internet note (my edits) |
 | E-42 | Task 14 (my own slips): when I replaced step 6's sentence I deleted the `alembic upgrade head` command itself, so a new reader would never have created the table; my edits to step 6's code block lost its indentation (an editor or paste effect), which can break the numbered list; and I committed the AI draft together with my edits instead of committing the draft first | My read-through of the README, a second review, and `git status` | Restored the command and re-indented the block; committed once with a message listing which edits were mine |
 | E-43 | Task 14: the README's step 2 used the Python launcher (`py -3.11 -m venv .venv`), which is not installed on every machine (it was missing in my clean checkout), so no virtual environment was created and the activation step failed | Clean-checkout test | Step 2 now uses `python -m venv .venv`, checks `python --version`, and mentions the launcher as an alternative; Prerequisites updated |
+| E-45 | The first baseline attempt stalled with `httpx.PoolTimeout` at 100/s. The AI-suggested server command used `url_shortener.app:application`. | `application` is a local variable inside `create_app`; the module-level name is `app` (README line 109). I used the README command and verified with curl (302, and 404 for a missing code). |
+| E-46 | `DATABASE_URL` was set with the literal placeholders `USER:PASSWORD`. | Took the real user and password from `.env`. Verified the bench database held 1,000,037 rows. |
+| E-47 | The service saturated at 99/s and 100/s: p99 1,495 ms and 2,328 ms, generator-limited. At 90/s all requests returned 302 with p99 103 ms but the run was also generator-limited. | NFR-3 (100/s) is **not demonstrated** on this machine; capacity is about 90/s. Cause not investigated (candidates: single worker, pool size, the machine). No tuning attempted. |
 
 ## Planning
 ### Prompt: 
@@ -4431,3 +4437,10 @@ All four quality gates pass. The existing edit to `AI_usage_log.md` was left unt
 No current contradiction was found: the requirements, design, and code agree that analytics are out of scope today and that `record_click()` is a no-op after a successful, unexpired lookup. The existing gap is that NFR-3 specifies server-side latency while the harness measures loopback end-to-end latency; the document records this limitation. Exact event delivery during a database failure also conflicts with guaranteeing the redirect remains 302, so the recommendation explicitly requires engineer approval of best-effort semantics.
 
 Made changes.
+
+##### Note:
+- Baseline: redirect-average, 25/s × 30 s, 1,000,000-row bench DB, 1 worker, pool 10/250 ms: 750/750 returned 302, 0 errors, p50 14.8 ms, p95 40.3 ms, p99 51.8 ms, max 62.0 ms, PASS.
+- Secondary: 50/s × 30 s: 1,500/1,500 returned 302, p99 47.2 ms, generator-limited.
+- Saturation evidence: 90/s p99 103 ms (generator-limited); 99/s p99 1,495 ms; 100/s p99 2,328 ms.
+- Threshold recorded before phase B (D-57).
+- NFR-3: 100 redirects/s not demonstrated on this machine; no tuning attempted.
