@@ -1,6 +1,6 @@
 import asyncio
-import json
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 import pytest
@@ -122,9 +122,8 @@ def test_status_distribution_counts_redirects_limits_failures_and_timeouts() -> 
     assert load_test.error_count(results) == 3
 
 
-def test_report_has_required_fields_without_sensitive_sentinels(
+def test_report_has_required_fields(
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
         load_test,
@@ -151,16 +150,6 @@ def test_report_has_required_fields_without_sensitive_sentinels(
         pool_wait_ms=250,
         now=datetime(2026, 9, 30, tzinfo=UTC),
     )
-    serialized = json.dumps(report) + load_test.render_markdown_report(report)
-    print(load_test.render_markdown_report(report))
-    printed = capsys.readouterr().out
-    sentinels = (
-        "SENTINEL_FULL_URL",
-        "SENTINEL_PASSWORD",
-        "SENTINEL_HOSTNAME",
-        "SENTINEL_USERNAME",
-        "SENTINEL_PATH",
-    )
 
     assert {
         "date_utc",
@@ -179,10 +168,10 @@ def test_report_has_required_fields_without_sensitive_sentinels(
         "verdict",
     } <= report.keys()
     assert report["verdict"] == "PASS"
-    assert all(sentinel not in serialized for sentinel in sentinels)
-    assert all(sentinel not in printed for sentinel in sentinels)
-    assert "302" in serialized
-    assert "SENTINEL_CODE" not in serialized
+    assert report["status_distribution"] == {"302": 1}
+    assert load_test.render_markdown_report(report).startswith(
+        "# Load test: redirect-average"
+    )
 
 
 def test_target_and_rate_safety_refusals() -> None:
@@ -247,3 +236,90 @@ def test_two_second_smoke_run_uses_in_process_asgi_transport() -> None:
     assert report["status_distribution"] == {"302": 4}
     assert report["latency_ms"]["p99_ms"] is not None
     assert report["dataset_rows"] == 50
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "http://user:SENTINEL_PASSWORD@127.0.0.1:8000",
+        "http://127.0.0.1:8000/SENTINEL_PATH",
+        "http://127.0.0.1:8000/?q=SENTINEL_FULL_URL",
+    ],
+)
+def test_target_url_with_credentials_path_or_query_is_refused(target: str) -> None:
+    with pytest.raises(ValueError) as caught:
+        load_test.validate_target_url(target)
+    assert "SENTINEL" not in str(caught.value)
+
+
+def _report(
+    profile: str, results: list[load_test.RequestResult], rate: float = 100
+) -> dict[str, Any]:
+    return load_test.create_report(
+        profile=profile,
+        target_base_url="http://127.0.0.1:8000",
+        dataset_rows=1,
+        requested_rate=rate,
+        offered_rate=rate,
+        duration_seconds=1.0,
+        results=results,
+        source_count=1,
+        pool_max=10,
+        pool_wait_ms=250,
+    )
+
+
+def test_redirect_average_verdict_fails_on_slow_p99() -> None:
+    slow = [load_test.RequestResult(302, 250.0, 0.0, False)]
+    assert _report("redirect-average", slow)["verdict"] == "FAIL"
+
+
+def test_redirect_average_verdict_fails_on_unexpected_status() -> None:
+    bad = [load_test.RequestResult(404, 5.0, 0.0, True)]
+    assert _report("redirect-average", bad)["verdict"] == "FAIL"
+
+
+def test_generator_limited_run_cannot_pass() -> None:
+    laggy = [load_test.RequestResult(302, 5.0, 50.0, False)]
+    report = _report("redirect-average", laggy)
+    assert report["generator_limited"] is True
+    assert report["verdict"] == "FAIL"
+
+
+def test_peak_and_overload_never_carry_a_pass_fail_verdict() -> None:
+    fast = [load_test.RequestResult(302, 5.0, 0.0, False)]
+    assert _report("redirect-peak", fast, 1000)["verdict"] == "REPORTED_ONLY"
+    assert _report("overload", fast)["verdict"] == "REPORTED_ONLY"
+
+
+def test_harness_never_sends_forwarded_headers() -> None:
+    seen: list[dict[str, str]] = []
+
+    async def recording_app(scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            return
+        await receive()
+        seen.append({k.decode(): v.decode() for k, v in scope["headers"]})
+        await send({"type": "http.response.start", "status": 302, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    asyncio.run(
+        load_test._run_profile(
+            profile="redirect-average",
+            target_base_url="http://127.0.0.1:8000",
+            rate=2,
+            duration_seconds=1,
+            codes=["AbC1234"],
+            source_addresses=["127.0.0.1"],
+            dataset_rows=1,
+            pool_max=10,
+            pool_wait_ms=250,
+            transport_factory=lambda _a: httpx.ASGITransport(app=recording_app),
+        )
+    )
+
+    assert seen
+    for headers in seen:
+        assert "x-forwarded-for" not in headers
+        assert "forwarded" not in headers
+        assert "x-real-ip" not in headers

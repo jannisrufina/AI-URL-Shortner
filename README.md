@@ -119,6 +119,7 @@ python -m scripts.seed_links --count 1000000 --seed 1 --reset --confirm-database
 
 # Optional 10M scale seed; same explicit opt-in, and only if needed:
 python -m scripts.seed_links --count 10000000 --seed 1 --allow-large --reset --confirm-database url_shortener_bench --sample-codes-count 10000 --sample-codes-file sample-codes-10m.txt
+```
 
 The commands above leave `DATABASE_URL` pointing at the benchmark database for
 the rest of that PowerShell window. Use a separate window for benchmarking, or
@@ -140,18 +141,18 @@ $env:DB_POOL_WAIT_MS = "250"
 python -m uvicorn url_shortener.app:app --host 127.0.0.1 --port 8000 --workers 1 --no-proxy-headers
 ```
 
-In a second PowerShell window, run one profile per command. The harness reads
-the row count using the supplied benchmark connection, but never prints the
-connection string. Create and mixed runs bind the listed loopback addresses;
-ensure they are available locally. With only one address, create load is
-reduced to its compliant rate and p99 is marked statistically weak.
+In a second PowerShell window (with the virtual environment activated), run one
+profile per command. Pass the seeded row count with `--dataset-rows`; the
+harness needs no database connection. Create and mixed runs bind the listed
+loopback addresses; ensure they are available locally. With only one address
+(omit `--source-addresses`), create load is reduced to its compliant rate and
+p99 is marked statistically weak.
 
 ```powershell
-$env:BENCH_DATABASE_URL = "postgresql://url_shortener:replace-with-a-local-password@localhost:5432/url_shortener_bench"
-python -m scripts.load_test --profile redirect-average --sample-codes-file sample-codes.txt --database-url $env:BENCH_DATABASE_URL --pool-max 10 --pool-wait-ms 250
-python -m scripts.load_test --profile redirect-peak --sample-codes-file sample-codes.txt --database-url $env:BENCH_DATABASE_URL --pool-max 10 --pool-wait-ms 250
-python -m scripts.load_test --profile create --database-url $env:BENCH_DATABASE_URL --source-addresses 127.0.0.1,127.0.0.2,127.0.0.3,127.0.0.4,127.0.0.5,127.0.0.6,127.0.0.7 --pool-max 10 --pool-wait-ms 250
-python -m scripts.load_test --profile mixed --sample-codes-file sample-codes.txt --database-url $env:BENCH_DATABASE_URL --source-addresses 127.0.0.1,127.0.0.2,127.0.0.3,127.0.0.4,127.0.0.5,127.0.0.6,127.0.0.7 --pool-max 10 --pool-wait-ms 250
+python -m scripts.load_test --profile redirect-average --sample-codes-file sample-codes.txt --dataset-rows 1000000 --pool-max 10 --pool-wait-ms 250
+python -m scripts.load_test --profile redirect-peak --sample-codes-file sample-codes.txt --dataset-rows 1000000 --pool-max 10 --pool-wait-ms 250
+python -m scripts.load_test --profile create --dataset-rows 1000000 --source-addresses 127.0.0.1,127.0.0.2,127.0.0.3,127.0.0.4,127.0.0.5,127.0.0.6,127.0.0.7 --pool-max 10 --pool-wait-ms 250
+python -m scripts.load_test --profile mixed --sample-codes-file sample-codes.txt --dataset-rows 1000000 --source-addresses 127.0.0.1,127.0.0.2,127.0.0.3,127.0.0.4,127.0.0.5,127.0.0.6,127.0.0.7 --pool-max 10 --pool-wait-ms 250
 ```
 
 For the overload profile, stop the server, restart it with pool maximum 1 and
@@ -165,13 +166,14 @@ python -m uvicorn url_shortener.app:app --host 127.0.0.1 --port 8000 --workers 1
 ```
 
 ```powershell
-python -m scripts.load_test --profile overload --sample-codes-file sample-codes.txt --database-url $env:BENCH_DATABASE_URL --pool-max 1 --pool-wait-ms 50
+python -m scripts.load_test --profile overload --sample-codes-file sample-codes.txt --dataset-rows 1000000 --pool-max 1 --pool-wait-ms 50
 ```
 
-Use `--dataset-rows N` instead of `--database-url` to omit the harness's
-database count query. Reports are written as JSON and Markdown in
-`bench-results/`. This measures end-to-end latency on loopback, which is an
-upper bound for server-side latency (so it includes client scheduling and
-loopback overhead). Results depend on the machine. If a target is missed, report
-it as not met; peak and overload results never replace the average-load NFR-3
-run.
+The create profile runs for at least four minutes. Close other programs while
+measuring, and run each profile twice to check that the numbers are stable.
+Reports are written as JSON and Markdown in `bench-results/`, which git ignores;
+copy the numbers you need into your notes. This measures end-to-end latency on
+loopback, which is an upper bound for server-side latency (so it includes
+client scheduling and loopback overhead). Results depend on the machine. If a
+target is missed, report it as not met; peak and overload results never replace
+the average-load NFR-3 run.
