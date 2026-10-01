@@ -4875,3 +4875,71 @@ Made changes.
 - **Verification:** tests 241 → 246 passed, 0 skipped (`REQUIRE_DB=1`); all four quality gates pass; the AI did not run load tests or touch the bench database.
 - **After-run (valid):** 2026-10-01 03:32 UTC (22:32 local), bench DB migrated to `20260930_0002`, same command as the baseline: 750/750 returned 302, 0 errors, p50 21.6 ms, p95 45.0 ms, p99 58.2 ms, max 100.3 ms, not generator-limited, PASS. Click rows in `link_clicks` afterwards: [750]. Threshold (D-57, p99 ≤ 77.8 ms): met. Measurable cost versus the baseline: p50 +6.8 ms and p99 +6.4 ms, from the extra insert and threadpool hop per redirect. Behaviour at 90–100/s with the extra insert was not tested.
 - **Invalid first after-run:** the bench DB was still at `20260929_0001`, so every click write failed (visible as "Click recording failed" in the server window) and the run measured the failure path (p99 47.9 ms, all 302). It was not used as evidence (E-56).
+
+## Task 16:
+### Prompt: 
+This is Task 16, Phase A: an ambiguous requirement. Do NOT write or change any code, tests or migrations in this phase.
+
+Context: this is the existing URL shortener (FastAPI, psycopg pool, PostgreSQL, Alembic, single worker). Read docs/requirements.md, docs/design.md, docs/architecture.md, docs/tasks.md (Task 16), url_shortener/app.py, url_shortener/database.py and url_shortener/settings.py first.
+
+The new requirement, exactly as I received it, is:
+
+    "Make the service more reliable."
+
+Create ONE file, docs/ambiguity-reliability.md, containing:
+1. Why this requirement is ambiguous. List at least six distinct things "reliable" could mean for this service (for example availability, failure handling, data durability, graceful degradation, observability, deploy safety, performance under load). For each, say what it would change in this codebase and roughly how large the change is.
+2. What the service already does for reliability today, citing the existing requirements and code (pool limits and timeouts, sanitized 503s, best-effort click writes, and so on), so nothing already built is proposed again.
+3. At most eight clarifying questions for me, ranked by how much each answer changes the work. For each question give the options you see and the trade-off.
+4. For each question, the default you would assume if I did not answer, and the risk of that default being wrong.
+5. A proposed smallest useful slice, offered as a recommendation for me to accept, change or reject. Do not treat it as decided.
+6. What is explicitly out of scope for that slice.
+
+Rules:
+- Do not choose an interpretation for me. Present options and ask.
+- Do not invent facts about deployment (orchestrator, monitoring, number of instances). Ask instead.
+- Do not touch docs/AI_usage_log.md. I maintain it myself.
+- Do not run load tests or touch the benchmark database.
+- Do not commit or push.
+
+Finish with a short chat message listing the file you created and the three questions you consider most important.
+
+#### Response:
+Optimized tool selection
+
+Updated todo list
+
+I’m reviewing the requirement and the existing reliability-related docs and code first so I can write the ambiguity memo without proposing anything that duplicates what’s already built.
+
+Read 
+
+Read 
+
+Read , lines 1 to 260
+
+Read , lines 1 to 260
+
+Read 
+
+Read 
+
+I’ve confirmed the core reliability requirements and the built-in safeguards; I’m checking whether Task 16 is explicitly defined in the task list so the ambiguity memo can anchor to the exact phase context.
+
+Searched for regex `Task 16|16\.` (`**/docs/tasks.md`), 2 results
+
+Read , lines 240 to 305
+
+Created 
+
+**Created**
+
+- `ambiguity-reliability.md`
+
+**Most important questions**
+
+1. What is the primary failure you want the service to survive: database outage, burst traffic, abuse, or data loss?
+2. Is this about user-facing availability, or just internal operational resilience and diagnosis?
+3. Should the scope stay inside the current single-process app and PostgreSQL boundary, or include deployment/topology choices?
+
+Created 1 todo
+
+Made changes.
