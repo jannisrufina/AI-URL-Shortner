@@ -72,6 +72,12 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | D-55 | Take a baseline redirect measurement on the unchanged code before Task 15 phase B, and fix the pass/fail threshold before any code changes. | A before/after comparison is only meaningful if the threshold isn't chosen after seeing the result. |
 | D-56 | Use the 25/s × 30 s run as the official baseline: 750/750 returned 302, 0 errors, p50 14.8 ms, p95 40.3 ms, p99 51.8 ms, max 62.0 ms, not generator-limited, PASS. | It was the only run that was clean under the harness's own criteria. The 50/s × 30 s run (p99 47.2 ms) was generator-limited, so it is kept only as a secondary data point. |
 | D-57 | Task 15 regression threshold: all 302, 0 errors, not generator-limited, p99 < 200 ms, and p99 ≤ max(1.5 × 51.8, 51.8 + 10) = 77.8 ms. Rerun once before concluding a regression. | The baseline p99 comes from 750 samples only, and runs differed by about 5 ms in the "wrong" direction, so there is noise. |
+| D-58 | Don't tune the service or change the harness's pass criteria after the 99/100 per second results. Report NFR-3 as not demonstrated at 100/s. | Changing the criteria after seeing results would hide a real finding. |
+| D-59 | Accepted the AI's `ContextVar` approach to pass the database into `record_click`. | It keeps the one-argument `record_click(link)` hook that existing tests monkeypatch. The threadpool copies the context, and the token is reset in `finally`. Indirect but correct; I reviewed the code. |
+| D-60 | The click-failure warning logs the short code only (no URL, no exception text). | The code is a public identifier. This overrides Phase A's recommendation not to log it, which I judged unnecessary. A test asserts the URL and exception message are absent. |
+| D-61 | Seeder `--reset` truncates `link_clicks` before `links`, in the same transaction. | Without a foreign key either order works technically; clearing events with the data keeps benchmark runs comparable. A test pins the order. |
+| D-62 | One best-effort insert per eligible redirect, with no retry. Keep the synchronous design; async queueing is future work. | A retry after an ambiguous failure could double count. Loss is documented in L-7 and the redirect is never failed. |
+| D-63 | Report NFR-3 as not met in the README, architecture doc and final summary. | Review found docs saying "not measured", but the 100/s run was measured and failed. |
 
 ## Errors and gaps I caught (AI's and my own)
 
@@ -123,6 +129,15 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | E-45 | The first baseline attempt stalled with `httpx.PoolTimeout` at 100/s. The AI-suggested server command used `url_shortener.app:application`. | `application` is a local variable inside `create_app`; the module-level name is `app` (README line 109). I used the README command and verified with curl (302, and 404 for a missing code). |
 | E-46 | `DATABASE_URL` was set with the literal placeholders `USER:PASSWORD`. | Took the real user and password from `.env`. Verified the bench database held 1,000,037 rows. |
 | E-47 | The service saturated at 99/s and 100/s: p99 1,495 ms and 2,328 ms, generator-limited. At 90/s all requests returned 302 with p99 103 ms but the run was also generator-limited. | NFR-3 (100/s) is **not demonstrated** on this machine; capacity is about 90/s. Cause not investigated (candidates: single worker, pool size, the machine). No tuning attempted. |
+| E-48 | AI's first migration file contained two concatenated copies and would not load. | Integration tests failed at Alembic load; AI rewrote the file. |
+| E-49 | AI left duplicate `record_link_click()` definitions and a stray assertion referencing an undefined `response` in the migration test. | Ruff/mypy gates and the full suite failed (245 passed, 1 failed); AI fixed them. I confirmed one definition remains. |
+| E-50 | AI put the reset-order assertion in the non-empty-table refusal test. | Focused test run; moved to the confirmed-reset test. |
+| E-51 | My review: the missing-table test only asserted 302, so it would pass even if the failure path never ran. | Strengthened to assert the code appears in the log, the URL does not, and no click row exists. |
+| E-52 | My review: README and architecture said the redirect profile "was not run / not measured". | The 100/s run was measured and failed. Replaced with the measured result (not met, about 90/s capacity). |
+| E-53 | My review: NFR-8 did not say it was measured at 25/s × 30 s, so it read like a 100/s requirement. | Rewrote NFR-8 with the exact conditions. |
+| E-54 | My review: the design DDL had an unnamed CHECK while the migration named it `link_clicks_code_format`, and the second migration was not mentioned. | Aligned the DDL and added the sentence. |
+| E-55 | My review: docs called the write best-effort but omitted that a failing write can delay the 302 by up to the 250 ms pool wait or the 1 s statement timeout. | Added to L-7, design and architecture. |
+| E-56 | My own slip: the first after-run measured the failure path because the bench DB had not been migrated. | Caught by reading the server window ("Click recording failed" on every request); confirmed with `alembic_version` and `\d link_clicks`; applied `alembic upgrade head`, truncated `link_clicks` and repeated the run. |
 
 ## Planning
 ### Prompt: 
@@ -4505,3 +4520,358 @@ PROCESS
 1. Before editing, write a short plan: files to change, the migration, the failure behaviour, and anything in the Phase A analysis you disagree with. Then continue without waiting.
 2. Implement, then run 'python -m scripts.check' and the full pytest suite with TEST_DATABASE_URL set.
 3. Finish with an exact report: files changed, test count before and after, the gate output, and every assumption you made or requirement you could not meet. If something failed or you are unsure, say so plainly.
+
+#### Response:
+Plan before editing: change only the redirect hook/app wiring, `links.py`, add one Alembic revision, extend redirect/integration tests, update requirements/design/architecture/README, and make the seeder’s confirmed `--reset` clear analytics before links. I’ll keep click writes best-effort so analytics failures cannot change 302, add no endpoint or dependency, and run no load test or seeder. I don’t currently disagree with Phase A’s option-b recommendation; I’ll verify its assumptions against the requested source files before implementation.
+
+Ran terminal command: git status --short
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read , lines 1 to 660
+
+Read 
+
+Read 
+
+Read , lines 245 to 282
+
+Read 
+
+Read 
+
+All requested files have been read. Phase A recommends a two-field append-only event and notes the delivery/failure tension; I agree with option b and will implement one best-effort insert attempt per eligible redirect, with no retry after an ambiguous failure. I plan to update the seeder’s confirmed `--reset` to truncate `link_clicks` before `links`, and to document that. Before editing, I’m establishing the current full-suite test count against the existing disposable test database without printing its connection string.
+
+Ran terminal command: $envValues = @{}; if (-not (Test-Path .env)) { throw 'Local .env file is unavailable.' }; foreach ($line in Get-Content .env) { if ($line -match '^\s*([^#=]+?)\s*=\s*(.*)\s*$') { $envValues[$Matches[1].Trim()] = $Matches[2].Trim() } }; if (-not $envValues['TEST_DATABASE_URL']) { throw 'TEST_DATABASE_URL is not configured in .env.' }; $env:TEST_DATABASE_URL = $envValues['TEST_DATABASE_URL']; $env:REQUIRE_DB = '1'; & .\.venv\Scripts\python.exe -m pytest -q
+
+The implementation plan is now specific: add one migration and one parameterized insert in `links.py`; run the existing hook through `run_in_threadpool` and catch/log failure with only the short code; test persisted writes, no-write cases, injected failures, missing table, and downgrade; update requirements/design/architecture/README and make seeder reset clear analytics first. I have no disagreement with Phase A’s chosen append-only approach, except that “exactly one” must mean one best-effort attempt/event on successful persistence, not guaranteed delivery during DB failure. I’m checking the full test baseline against the configured test database before editing.
+
+Ran terminal command: $environment = @{}; if (-not (Test-Path .env)) { throw 'The local .env file is unavailable.' }; foreach ($line in Get-Content .env) { if ($line -match '^\s*([^#=]+?)\s*=\s*(.*)\s*$') { $environment[$Matches[1].Trim()] = $Matches[2].Trim() } }; if (-not $environment['TEST_DATABASE_URL']) { throw 'TEST_DATABASE_URL is not configured in .env.' }; $env:TEST_DATABASE_URL = $environment['TEST_DATABASE_URL']; $env:REQUIRE_DB = '1'; & .\.venv\Scripts\python.exe -m pytest -q
+
+The baseline is **241 passed, 0 skipped** with the configured test DB, so I’ll use that as “before.” Implementation plan: add `link_clicks` without an FK, insert through `links.py`, call it in a threadpool at the existing hook, and catch/log failures with only the short code so 302 is preserved. I’ll make seeder `--reset` truncate events before links, add focused and migration tests, and update the approved docs/README; I have no disagreement with Phase A, with best-effort delivery as the explicit limitation. I will not touch `AI_usage_log.md`, run load tests, or use the benchmark database.
+
+Generating patch (101 lines) in , , 
+
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+The first implementation slice is in: the migration has no FK and a `(code, clicked_at)` index; `record_link_click()` uses one parameterized insert; the route still calls the existing one-argument hook through `run_in_threadpool`, with a scoped failure catch and short-code-only warning. I’m running the redirect tests now to verify old hook placement and response behavior remain intact before adding integration cases.
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_redirects.py -q
+
+I’m implementing the persisted write while preserving the existing one-argument `record_click(link)` hook that current tests monkeypatch: a request-local `ContextVar` will carry the current pool into the threadpool call, avoiding a public/API or test-hook signature change. The route will catch any write exception, log only the code, reset the context, and continue to the same 302. I’m adding the migration and insert helper now.
+
+Generating patch (101 lines) in , , 
+
+Generating patch (45 lines) in 
+
+
+```
+
+```
+
+
+Generating patch (21 lines) in 
+
+
+```
+
+```
+
+
+Generating patch (40 lines) in 
+
+The app patch context failed, likely because the current file’s import block has changed since the earlier read. The migration and links helper were added separately; I’m rereading the app import/hook/redirect sections and will apply only against the current text.
+
+Read , lines 1 to 55
+
+Read , lines 175 to 240
+
+Read , lines 390 to 455
+
+Read , lines 455 to 462
+
+Generating patch (179 lines) in , 
+
+
+```
+
+```
+
+```
+
+```
+The event-write tests are added, including an actual missing-table case that renames the table only during the request and restores it in `finally`, plus migration downgrade/upgrade coverage preserving `links`. I’m checking the current seeder reset test before adding the requested “clear click events first” assertion.
+
+Read , lines 245 to 335
+
+Generating patch (19 lines) in , 
+
+
+```
+
+```
+
+```
+
+```
+Seeder reset now truncates `link_clicks` before `links` inside the existing confirmed-reset transaction, and its test pins that order. I’m updating the approved requirement set now: FR-13 for best-effort event recording, NFR-8 using D-57’s 77.8 ms threshold (engineer-measured), L-7 for loss/retention limitations, and moving analytics out of initial-build scope.
+
+Generating patch (21 lines) in 
+
+
+```
+
+```
+
+
+Generating patch (34 lines) in 
+
+
+```
+
+```
+
+
+Generating patch (25 lines) in 
+
+
+```
+
+```
+Requirements/design/architecture now describe the event table and best-effort redirect boundary; the architecture also explicitly records the seeder-reset interaction and current NFR-3 status. I’m checking the current README placement and seeder reset test before the final small edits, and verifying the hook wrapper currently present in `app.py`.
+
+Searched for regex `Limitations|reset|link_clicks` (`**/README.md`), 9 results
+
+Read , lines 190 to 230
+
+Read , lines 275 to 335
+
+Read , lines 438 to 462
+
+Read , lines 295 to 325
+
+Generating patch (20 lines) in 
+
+The README and seeder-reset tests already exist in the expected shape. The requirements patch failed at the Out of scope wording, so it applied nothing; I’m checking the current tail of `requirements.md` and will split the requirement additions from the scope-line replacement.
+
+Read 
+
+Generating patch (8 lines) in 
+
+
+```
+
+```
+
+
+Searched for regex `click|Click` (`**/docs/design.md`), 9 results
+
+Searched for regex `click|Click` (`**/docs/architecture.md`), 5 results
+
+Searched for regex `link_clicks|TRUNCATE` (`**/scripts/seed_links.py`), 2 results
+
+Searched for regex `test_click_write|link_clicks|click_migration|missing_clicks` (`**/tests/**`), 13 results
+
+The current design and architecture already describe the event table, no-FK reset rationale, and best-effort hook; I’ll preserve their wording and check the worktree diff rather than duplicate or overwrite it. I’m confirming the README reset note and exactly which files are modified before continuing with the missing test/schema checks.
+
+Ran terminal command: git status --short
+
+Ran terminal command: git diff -- docs/design.md docs/architecture.md docs/requirements.md README.md scripts/seed_links.py
+
+Read , lines 210 to 331
+
+Read 
+
+Read , lines 180 to 227
+
+Read , lines 650 to 795
+
+Generating patch (10 lines) in 
+
+
+```
+
+```
+
+
+Generating patch (15 lines) in 
+
+
+```
+
+```
+The migration, writer, app hook, tests, and reset behavior are now wired; README notes the reset policy and L-7. The redirect unit failure test keeps the existing hook’s one-argument signature, while the threadpool receives the request-local database context. I’m running the focused redirect and PostgreSQL click/migration tests now before the full suite.
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_redirects.py -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_database_integration.py -k "click or migration" -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_seed_links.py -k reset -q
+
+Read , lines 1 to 240
+
+The focused redirect tests and seeder-reset test pass. PostgreSQL integration setup found a migration syntax error: the new Alembic file lacks a final newline, so Python concatenates the next source text during module loading. I’m correcting the file ending, then I’ll rerun the migration-backed tests before the full suite.
+
+Read 
+
+Generating patch (46 lines) in , 
+
+Inspection confirms the migration file contains two concatenated copies, explaining why Alembic fails before integration tests run. I’m replacing that one migration file cleanly with a single revision and will immediately rerun the migration-backed tests.
+
+Generating patch (3 lines) in 
+
+Generating patch (45 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: $values = @{}; foreach ($line in Get-Content .env) { if ($line -match '^\s*([^#=]+?)\s*=\s*(.*)\s*$') { $values[$Matches[1].Trim()] = $Matches[2].Trim() } }; $env:TEST_DATABASE_URL = $values['TEST_DATABASE_URL']; $env:REQUIRE_DB = '1'; & .\.venv\Scripts\python.exe -m pytest tests/test_database_integration.py -k "successful_redirect_records or redirect_404_cases or missing_clicks_table or click_migration" -q
+Completed with input: $values = @{}; foreach ($line in Get-Content .env) { if ($line -match '^\s*([^#=]+?)\s*=\s*(.*)\s*$') { $values[$Matches[1].Trim()] = $Matches[2].Trim() } }; $env:TEST_DATABASE_URL = $values['TEST_DATABASE_URL']; $env:REQUIRE_DB = '1'; & .\.venv\Scripts\python.exe -m pytest tests/test_database_integration.py -k "successful_redirect_records or redirect_404_cases or missing_clicks_table or click_migration" -q
+
+The focused PostgreSQL run confirmed event writes, 404 no-write behavior, and missing-table best effort all pass. The migration test then exposed a stray assertion at the end of the integration file referencing an undefined `response`; I’m inspecting the current surrounding tests so I can relocate that assertion to its form test without dropping coverage.
+
+Read , lines 555 to 795
+
+Generating patch (15 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: $environment = @{}; foreach ($line in Get-Content .env) { if ($line -match '^\s*([^#=]+?)\s*=\s*(.*)\s*$') { $environment[$Matches[1].Trim()] = $Matches[2].Trim() } }; $env:TEST_DATABASE_URL = $environment['TEST_DATABASE_URL']; $env:REQUIRE_DB = '1'; & .\.venv\Scripts\python.exe -m pytest tests/test_database_integration.py -k "successful_redirect_records or redirect_404_cases or missing_clicks_table or click_migration" -q
+
+The migration-backed focus now passes **4/4** against the configured test database, including real event persistence, no writes for 404 cases, a renamed-away event table preserving 302, and migration downgrade/re-upgrade preserving `links`. The failure-injection redirect test also passes; I’m running the full suite with `REQUIRE_DB=1` and all gates next.
+
+Ran terminal command: $environment = @{}; foreach ($line in Get-Content .env) { if ($line -match '^\s*([^#=]+?)\s*=\s*(.*)\s*$') { $environment[$Matches[1].Trim()] = $Matches[2].Trim() } }; $env:TEST_DATABASE_URL = $environment['TEST_DATABASE_URL']; $env:REQUIRE_DB = '1'; & .\.venv\Scripts\python.exe -m pytest -q
+Completed with input: $environment = @{}; foreach ($line in Get-Content .env) { if ($line -match '^\s*([^#=]+?)\s*=\s*(.*)\s*$') { $environment[$Matches[1].Trim()] = $Matches[2].Trim() } }; $env:TEST_DATABASE_URL = $environment['TEST_DATABASE_URL']; $env:REQUIRE_DB = '1'; & .\.venv\Scripts\python.exe -m pytest -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+
+Ran terminal command: git diff --check -- README.md docs/requirements.md docs/design.md docs/architecture.md alembic/versions/20260930_0002_link_clicks.py scripts/seed_links.py tests/test_redirects.py tests/test_database_integration.py tests/test_seed_links.py url_shortener/app.py url_shortener/links.py
+
+The full database-backed run reached **245 passing tests and one failure**: an existing URL assertion is misplaced at the end of the migration test and references an undefined `response`. Quality gates also caught duplicate `record_link_click()` definitions and a reset assertion inserted into the wrong unit test. I’m rereading those exact sections and will correct placement/duplication without changing test coverage or redirect behavior.
+
+Read 
+
+Read , lines 1 to 35
+
+Read , lines 130 to 215
+
+Read , lines 625 to 795
+
+Read , lines 280 to 335
+
+Read , lines 1 to 20
+
+Read , lines 32 to 42
+
+Read , lines 1 to 42
+
+Generating patch (35 lines) in , 
+
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_redirects.py tests/test_seed_links.py -q
+Completed with input: & .\.venv\Scripts\python.exe -m pytest tests/test_redirects.py tests/test_seed_links.py -q
+
+The focused test exposed that the reset-order assertion landed in the non-empty refusal test rather than the confirmed-reset test; behavior is unchanged, but the assertion’s placement is wrong. I’m rereading that test block and will move the assertion by function context, then rerun the focused slice.
+
+Read , lines 255 to 335
+
+Generating patch (10 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_redirects.py tests/test_seed_links.py -q
+
+The focused slice is green (`35 passed`). The misplaced assertion is now only in the confirmed-reset test, where it verifies analytics are truncated before links; the existing non-empty-table refusal test is restored unchanged. I’m applying the formatter/import sorter across the touched Python files before the final full database-backed run.
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m ruff check --fix url_shortener/app.py url_shortener/links.py alembic/versions/20260930_0002_link_clicks.py tests/test_redirects.py tests/test_database_integration.py tests/test_seed_links.py
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m ruff format url_shortener/app.py url_shortener/links.py alembic/versions/20260930_0002_link_clicks.py tests/test_redirects.py tests/test_database_integration.py tests/test_seed_links.py
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; $environment = @{}; foreach ($line in Get-Content .env) { if ($line -match '^\s*([^#=]+?)\s*=\s*(.*)\s*$') { $environment[$Matches[1].Trim()] = $Matches[2].Trim() } }; $env:TEST_DATABASE_URL = $environment['TEST_DATABASE_URL']; $env:REQUIRE_DB = '1'; & .\.venv\Scripts\python.exe -m pytest -q
+
+The complete required run passes: **246 passed, 0 skipped** with `REQUIRE_DB=1`; all four quality gates pass. The existing short-code privacy recommendation in Phase A conflicts with Phase B’s explicit requirement to include the code in the failure warning, so I followed Phase B and will flag that for review. I’m taking the final status/diff check now and will not run any benchmark or seeder.
+
+Ran terminal command: git status --short
+
+Ran terminal command: git diff --check -- README.md docs/requirements.md docs/design.md docs/architecture.md alembic/versions/20260930_0002_link_clicks.py scripts/seed_links.py tests/test_redirects.py tests/test_database_integration.py tests/test_seed_links.py url_shortener/app.py url_shortener/links.py
+
+Ran terminal command: git diff --stat -- README.md docs/requirements.md docs/design.md docs/architecture.md alembic/versions/20260930_0002_link_clicks.py scripts/seed_links.py tests/test_redirects.py tests/test_database_integration.py tests/test_seed_links.py url_shortener/app.py url_shortener/links.py
+
+Implemented Phase B with an append-only `link_clicks` table and best-effort recording in the existing post-lookup/post-expiry hook. The synchronous insert runs via `run_in_threadpool`; any write failure logs a warning with the short code only and preserves the 302. No event is attempted for malformed, missing, or expired links. The confirmed seeder reset clears `link_clicks` before `links`; the migration intentionally has no FK.
+
+**Files changed**
+- `README.md`
+- `architecture.md`
+- `design.md`
+- `requirements.md`
+- `seed_links.py`
+- `test_database_integration.py`
+- `test_redirects.py`
+- `test_seed_links.py`
+- `app.py`
+- `links.py`
+
+Created: `20260930_0002_link_clicks.py`.
+
+The pre-existing edit to `AI_usage_log.md` was not touched.
+
+**Verification**
+Baseline: **241 passed**. After: **246 passed, 0 skipped** with `REQUIRE_DB=1`. All four quality gates pass. The analytics migration downgrade test preserves `links`; no load test, seeder CLI, or benchmark database was used. No performance result is claimed.
+
+**Decision to review**
+Phase A recommended not logging the short code, while this task explicitly requires it in a warning. I followed Phase B: the warning includes only the code, not the URL or exception text. The event is best-effort, so a failed write can lose a click; the redirect remains 302.
+
+Made changes.
+
+##### Note:
+**Task 15: Click analytics (brownfield change)**
+
+- **Phase A (analysis):** AI wrote `docs/analytics-impact.md` (options a to d). I chose option b: a synchronous, append-only `link_clicks(code, clicked_at)` table, best-effort, with the 302 preserved. My amendments: no foreign key, a broad `except Exception` around the write, `run_in_threadpool`, and a regression threshold fixed before any code change.
+- **Baseline (before Phase B):** `redirect-average`, 25/s × 30 s, 1,000,000-row bench DB, 1 worker, pool 10/250 ms: 750/750 returned 302, 0 errors, p50 14.8 ms, p95 40.3 ms, p99 51.8 ms, max 62.0 ms, not generator-limited, PASS (D-56). Saturation runs: 90/s p99 103 ms (generator-limited), 99/s p99 1,495 ms, 100/s p99 2,328 ms.
+- **Phase B (implementation):** AI added migration `20260930_0002` (no FK, code CHECK, `(code, clicked_at)` index), `record_link_click` in `links.py`, the click write in the existing hook, seeder `--reset` clearing `link_clicks` first, tests, and doc edits. Committed as drafted ("Task 15: AI draft of best-effort click recording").
+- **My review:** read the migration, `app.py`, `links.py`, `seed_links.py`, `test_redirects.py`, `test_seed_links.py`, `test_database_integration.py` and the four docs. Counted the 28 existing integration tests and confirmed all are still present.
+- **Verification:** tests 241 → 246 passed, 0 skipped (`REQUIRE_DB=1`); all four quality gates pass; the AI did not run load tests or touch the bench database.
+- **After-run (valid):** 2026-10-01 03:32 UTC (22:32 local), bench DB migrated to `20260930_0002`, same command as the baseline: 750/750 returned 302, 0 errors, p50 21.6 ms, p95 45.0 ms, p99 58.2 ms, max 100.3 ms, not generator-limited, PASS. Click rows in `link_clicks` afterwards: [750]. Threshold (D-57, p99 ≤ 77.8 ms): met. Measurable cost versus the baseline: p50 +6.8 ms and p99 +6.4 ms, from the extra insert and threadpool hop per redirect. Behaviour at 90–100/s with the extra insert was not tested.
+- **Invalid first after-run:** the bench DB was still at `20260929_0001`, so every click write failed (visible as "Click recording failed" in the server window) and the run measured the failure path (p99 47.9 ms, all 302). It was not used as evidence (E-56).
