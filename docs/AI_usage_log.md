@@ -4126,3 +4126,143 @@ No handler body, dependency, exception registration, route order, or error-handl
 `python -m scripts.export_openapi --check` and all four quality gates pass. Pytest reports **213 passed, 28 skipped: 241 tests total**. The skips are the existing database integration tests. No separate implementation decision needs review beyond the chosen OpenAPI title and version (`AI URL Shortener API`, `1.0.0`).
 
 Made changes.
+
+## Task 14:
+### Prompt:
+This is a NEW task: Task 14. Tasks 1 through 13 are already committed. Do not
+summarize earlier tasks. Before changing anything, reply with the list of files
+you will change, then proceed.
+
+Task 14 from docs/tasks.md: Complete the setup instructions. Read docs/tasks.md
+(Task 14), docs/requirements.md, docs/architecture.md, README.md,
+.env.example, docker-compose.yml, alembic.ini, .github/workflows/quality.yml,
+and scripts/. Change ONLY README.md. Do not modify any other file. Do not
+commit or push.
+
+Intent: a new reader can start from a clean clone on a Windows PowerShell
+machine and reach a working create form and redirect by following the README
+in order, with no undocumented local state.
+
+Restructure the README (keep all existing correct content and commands; move
+and add, do not delete working instructions):
+1. Title and a short overview (what the service does, the stack, and one
+   sentence on how it was built: AI-assisted, with the process records in
+   docs/).
+2. Prerequisites with versions: Python 3.11.9, Docker Desktop with Compose
+   (running), Git, PowerShell. Note that the project was developed on
+   Windows (including an ARM machine); if the PostgreSQL image or Docker
+   needs a different build on other machines, say what to check.
+3. Quick start, numbered, each step with the exact command and what a correct
+   result looks like: (1) clone; (2) create and activate the virtual
+   environment, install requirements; (3) copy .env.example to .env and set a
+   local password; (4) start PostgreSQL and wait for healthy; (5) set the
+   environment variables for the app (state that they last only for the
+   current PowerShell window, and that the password must match
+   POSTGRES_PASSWORD in .env); (6) apply migrations; (7) start the app;
+   (8) try it: open http://127.0.0.1:8000/ and submit a URL, and a curl.exe or
+   Invoke-RestMethod example for POST /api/links and following the short code.
+   For local use set PUBLIC_BASE_URL to http://127.0.0.1:8000 so the short
+   link is clickable, and explain that the production value is a hostname
+   chosen for the deployment.
+4. A "Common problems" list from real issues: "No module named ..." means the
+   virtual environment is not active (use .\.venv\Scripts\python.exe or
+   activate); a settings error naming PUBLIC_BASE_URL or DATABASE_URL means
+   the variables are not set in this window; "password authentication
+   failed" means the .env password and the URL password disagree (reset with
+   docker compose down -v and start again); "database ... does not exist"
+   means createdb was skipped; ports and Docker not running.
+5. Running the quality checks and tests (existing content): the order of
+   commands, the database variables needed for the integration tests, what
+   REQUIRE_DB does, the expected result (all tests pass, none skipped when the
+   database is available), and the habit of running scripts/check.py before
+   every push.
+6. Seeding, load testing, and API specification sections (existing content,
+   unchanged except for placement).
+7. Limitations and known gaps in one short list that points to
+   docs/requirements.md (L-1 to L-6) and docs/architecture.md (additional
+   known gaps), and says plainly that the redirect load profile was not run
+   and NFR-3 is therefore not measured; the create profile was run once from
+   a single source address with 36 requests, so its p99 is statistically weak.
+8. Repository map: a short table of the folders and files that matter
+   (url_shortener/, alembic/, tests/, scripts/, docs/ with what each docs file
+   is, .github/workflows/).
+
+Constraints: every command must work as written for a new user (check flag
+names and module names against the code); no real passwords, only
+placeholders; PowerShell syntax throughout; do not claim any test count or
+result you have not seen; keep it readable (no more than about 300 lines).
+All four quality gates must pass. List what you changed.
+
+#### Response:
+File I will change: `README.md` only. I’ll read the requested project/docs/config files, inspect every script entry point and the current README, then rewrite it in the requested Windows-first order while retaining the valid seeding, load-testing, and API-spec instructions.
+
+Ran terminal command: $remote = git remote get-url origin 2>$null; if ($remote) { try { $uri = [System.Uri]$remote; '{0}://{1}{2}' -f $uri.Scheme, $uri.Host, $uri.AbsolutePath } catch { 'Origin remote is not a URL.' } } else { 'No origin remote configured.' }
+
+Read 
+
+Read 
+
+Read 
+
+Read , lines 206 to 255
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+The current Git origin is `https://github.com/jannisrufina/AI-URL-Shortner.git`, so I can give a concrete clone command. The README’s stored seeding/load/API sections are present; I’m now reading each script entry point to verify command names/defaults and will preserve those sections while reorganizing them.
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+I’ve confirmed the clone URL and every documented CLI/module name against the repository. I’m replacing only `README.md` with a Windows PowerShell walkthrough in the requested order, retaining the existing quality-gate probes, seed/load profiles, and OpenAPI commands while adding expected results, troubleshooting, limitations, and the repository map.
+
+Generating patch (3 lines) in 
+
+Generating patch (313 lines) in 
+
+
+```
+
+```
+The README is in the requested order, but review against the previous text shows two useful existing instructions were dropped in the rewrite: pinned lock regeneration and the quality-gate failure-probe table. I’ll restore those and make the `.env`/environment-step success criteria explicit, then check the document stays near the 300-line target.
+
+Generating patch (50 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: (Get-Content README.md | Measure-Object -Line).Lines
+
+Ran terminal command: git status --short
+
+Ran terminal command: git diff --check -- README.md
+
+The README is 266 lines, stays below the requested approximate limit, and `git status` shows only `README.md` changed. The quick-start, troubleshooting, quality/test, benchmark, API-spec, limitations, and repository-map sections are all present; I’m running the required quality-gate script now.
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+
+Reorganized `README.md` into a Windows PowerShell clean-clone walkthrough, with expected results, troubleshooting, quality/test instructions, preserved benchmark and API-spec sections, limitations, and a repository map. It is 266 lines.
+
+All four quality gates passed. Pytest was not run; this task changed documentation only. Only `README.md` was changed.
+
+Made changes.
+
