@@ -4273,3 +4273,161 @@ All four quality gates passed. Pytest was not run; this task changed documentati
 
 Made changes.
 
+## Task 15:
+### Prompt:
+This is a NEW task: Task 15, phase A (impact analysis only). Tasks 1 through
+14 are already committed. Do not summarize earlier tasks. Before writing
+anything, reply with the list of files you will create or change, then proceed.
+
+Task 15 from docs/tasks.md is the brownfield scenario: add click analytics to
+the existing redirect path. Read docs/tasks.md (Task 15), docs/requirements.md
+(especially the "Out of scope" section, FR-2, FR-8, FR-9, NFR-2, NFR-3, NFR-5,
+L-3), docs/design.md, docs/architecture.md, and the real code:
+url_shortener/app.py (the redirect route and the record_click hook),
+links.py, database.py, settings.py, alembic/versions/, tests/test_redirects.py,
+tests/test_database_integration.py, scripts/load_test.py, scripts/seed_links.py.
+
+Create ONLY one new file: docs/analytics-impact.md. Do not write or change any
+code, test, migration, or any existing file (including requirements.md and
+design.md). Do not commit or push.
+
+The document must contain, grounded in the code you read:
+1. Current state: the exact redirect flow and where record_click is called
+   (file and function names); what tests already pin the hook's placement.
+2. Impact map: every module, data flow, API, schema object, test, document,
+   and tool this change would touch (include the seeder, load harness,
+   OpenAPI file, and the architecture document), and which would NOT.
+3. Options (at least these four, each with trade-offs):
+   a. a click_count column on links, updated synchronously in the redirect;
+   b. an append-only link_clicks table (code, clicked_at), one insert per
+      redirect, written synchronously;
+   c. the same events table written after the response is sent (a background
+      task);
+   d. an in-process counter flushed periodically.
+   For each: schema change and migration risk on a table of 1M to 10M rows;
+   write amplification and lock or contention behavior (include the hot-code
+   case: one popular link receiving most of the traffic); effect on the
+   database connection pool (default max 10, wait 250 ms); what happens to
+   the redirect when the analytics write is slow or fails; durability if the
+   process crashes; storage growth at 100 redirects per second; testability.
+4. Privacy and logging: state what is stored (the short code and a UTC
+   timestamp only) and what is NOT stored (client IP, user agent, referrer,
+   full URL); that nothing sensitive enters logs; retention; and the
+   consequences of the existing "no URL in logs" rule (NFR-2).
+5. Failure behavior: the rule that an analytics failure must never change the
+   redirect response (302 stays 302; 404 stays 404; a database outage still
+   returns the existing sanitized 503 from the lookup), and how each option
+   meets it; what is recorded when a write fails (without URLs).
+6. Expected redirect overhead for each option, with your reasoning, clearly
+   labeled as an estimate, not a measurement.
+7. A recommendation: the smallest slice that gives exactly one recorded event
+   per successful, unexpired redirect (never for 404, expired, or malformed
+   codes), with no dashboard and no new public endpoint. Explain why it beats
+   the others, and what you would cut first.
+8. Proposed requirement text (NOT added to any requirements file): new FR and
+   NFR wording, the change to the "Out of scope" entry, any new limitation,
+   and what would have to change in design.md and architecture.md.
+9. Test plan: unit and integration tests for hook placement and behavior,
+   failure injection (the analytics write raising a typed database error must
+   still return 302), no event for 404, expired, or malformed codes, no
+   personal data, migration up and down.
+10. Latency regression plan: the exact commands, using the existing
+    scripts/load_test.py redirect-average profile, to measure a baseline on
+    the current code and an "after" run on the changed code against the same
+    1,000,000-row benchmark database; the pass condition (redirect p99 below
+    200 ms, all 302s, not generator-limited, plus a proposed relative limit
+    against the baseline); what to do if it is missed. State that the AI
+    cannot run the load test and the engineer will.
+11. Risks, rollback (including how to revert the migration), and an explicit
+    "decisions I need from the engineer" list.
+
+Constraints: do not claim any measured number you have not seen; use
+requirement IDs exactly as they appear; keep the document under about four
+pages. All four quality gates must pass (python scripts/check.py). When done,
+list what you created and any contradiction or gap you found in the existing
+docs or code.
+
+#### Response:
+File I will create: docs/analytics-impact.md only. I’ll read the specified requirements/design/architecture and trace the current redirect hook, persistence/database boundaries, relevant tests, migration, and benchmark tools before writing the impact analysis.
+
+Ran terminal command: git status --short
+
+Searched for text `## 15. Brownfield scenario: click analytics` (`**/docs/tasks.md`), 1 result
+
+Searched for files matching `**/docs/openapi.json`, 1 match
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read , lines 340 to 500
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+The impact map is now grounded in the redirect hook, typed database failures, migration, integration tests, and current tools. I’m checking Task 15’s exact wording and the committed OpenAPI artifact’s paths so the proposal can distinguish files that would change from those that should remain untouched.
+
+Read , lines 1 to 100
+
+Read , lines 253 to 285
+
+Read , lines 1 to 80
+
+Read 
+
+The analysis is complete. I’m creating the single requested document with a compact impact map, four-option comparison, best-effort failure semantics, explicit analytics scope proposals, rollback/testing plans, and before/after loopback load commands; it will state clearly that exact persistence cannot be guaranteed during a database failure without changing the 302 behavior.
+
+Generating patch (120 lines) in 
+
+
+```
+
+```
+The impact document is drafted. I’m checking the current text for length and consistency before the gates; in particular, I’m verifying that the proposed table contains only `code` and `clicked_at`, and that rollback names the actual current Alembic revision.
+
+Ran terminal command: (Get-Content docs/analytics-impact.md | Measure-Object -Line).Lines
+
+Ran terminal command: git status --short
+
+Read 
+
+I found one proposal inconsistency before finalizing: it mentioned a generated `event_id`, while the privacy section promises only short code and UTC timestamp. I’m removing that extra field from the proposed event schema, making the table use only those two columns, naming the current Alembic downgrade target explicitly, and showing the exact baseline and after commands separately.
+
+Generating patch (29 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+
+Ran terminal command: (Get-Content docs/analytics-impact.md | Measure-Object -Line).Lines
+
+Ran terminal command: git diff --check -- docs/analytics-impact.md
+
+Ran terminal command: git status --short
+
+Created `analytics-impact.md` only. It is 82 lines and includes the four-option impact comparison, privacy and failure behavior, a recommendation, proposed requirement wording, regression commands, rollback, and engineer decisions.
+
+All four quality gates pass. The existing edit to `AI_usage_log.md` was left untouched.
+
+No current contradiction was found: the requirements, design, and code agree that analytics are out of scope today and that `record_click()` is a no-op after a successful, unexpired lookup. The existing gap is that NFR-3 specifies server-side latency while the harness measures loopback end-to-end latency; the document records this limitation. Exact event delivery during a database failure also conflicts with guaranteeing the redirect remains 302, so the recommendation explicitly requires engineer approval of best-effort semantics.
+
+Made changes.
