@@ -8,9 +8,9 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 - **Security practices:** no secrets or credentials in prompts; `.env` is ignored and only placeholder values are committed; the assignment text was shared once with the planning chat (Claude) to understand requirements and was not given to Copilot; every AI change was reviewed, tested, and run through the quality gates before I relied on it.
 - **Stages so far:**
   - Planning: requirements, design, tasks
-  - Tasks 1 to 10: quality gates and CI, architecture overview, app bootstrap, URL validation, create limiter, create API, redirects, create form, end-to-end tests, performance data seeder
+  - Tasks 1 to 11: quality gates and CI, architecture overview, app bootstrap, URL validation, create limiter, create API, redirects, create form, end-to-end tests, performance data seeder, load-test harness and runs
   - Next: [Task 12 (reconcile the architecture doc), then Task 14 (setup instructions)]
-  - Still to do: Task 11 (load tests), Task 13 (OpenAPI export), Tasks 15 and 16 (the two scenarios), Task 17 (final summary)
+  - Still to do: Task 13 (OpenAPI export), Tasks 15 and 16 (the two scenarios), Task 17 (final summary)
 
 ## Decisions (what the AI proposed, what I chose, why)
 
@@ -56,6 +56,10 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | D-38 | Row generation (Task 10) | Codes come from a bijection (index times 37 modulo 62^7, so every code is unique); synthetic `https://bench.example/...` URLs; SHA-256 digest of the exact URL bytes; a seeded `random.Random` picks the ~5% of rows with an expiry | Accepted | Deterministic, repeatable data that satisfies the real schema constraints and never needs normalization |
 | D-39 | Timestamps in seeded rows (Task 10) | `created_at` pinned near the year 2000 | Changed (AI follow-up at my request): `created_at` is 2026-09-01 plus `seed % 86400` seconds, and expiries are 30 to 365 days later [or 90 to 365 if you made the optional edit] | Rows with an expiry must still be active when the load test runs (E-30) |
 | D-40 | Benchmark scale (Task 10) | 10M rows named as the target | Measured at 1,000,000 rows; 10M extrapolated, not run | Time and disk; the per-row sizes scale linearly, and the load took 11.8 seconds for 1M |
+| D-41 | Load generation method (Task 11) | Open-loop schedule: requests are sent at the offered rate and latency is measured from the scheduled send time, not the actual send time | Accepted | A slow server cannot hide its own latency by slowing the generator (coordinated omission); generator lag is recorded and reported |
+| D-42 | Which runs carry a verdict (Task 11) | Only `redirect-average` (NFR-3, p99 below 200 ms at the A-6 average of 100 requests/second) and `create` (NFR-4, p99 below 300 ms) have PASS or FAIL; `redirect-peak`, `mixed`, and `overload` are `REPORTED_ONLY`. A run with any unexpected status, or marked generator-limited, cannot pass | Accepted | Matches the decision that the average load is the pass/fail condition and peak load is reported but not a target |
+| D-43 | Create-load limit (Task 11) | The create profile never exceeds 9 creates per 60 seconds per source address and never sends `X-Forwarded-For`, `Forwarded`, or `X-Real-IP`, so it respects the server's per-IP limiter (NFR-1) | Accepted; [ran with one source address / ran with N loopback addresses] | With one address the sample is about 36 creates in 240 seconds, so the create p99 is statistically weak and is reported that way |
+| D-44 | What the numbers mean (Task 11) | Latency is measured end to end from a client on the same machine (loopback), so it includes client scheduling and loopback overhead | Accepted | It is an upper bound for server-side latency, and results depend on the machine |
 
 ## AI errors and gaps I caught
 
@@ -93,6 +97,9 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | E-30 | Task 10: seeded rows had `created_at` in the year 2000, so every generated expiry was already in the past (about 5% of rows); the test named "...and_future" passed because it compared each expiry with its own row's `created_at`. Benchmark redirects for those codes would have returned 404 | Second-AI review of the code and tests | Follow-up prompt with a 2026 anchor and 30 to 365 day expiries; after seeding, `SELECT ... WHERE expires_at <= now()` returned 0 (480 of 10,000 rows have an expiry) |
 | E-31 | Task 10: the README ran the 1M seed right after the 10K seed with no `--reset`, so a reader following it in order would be refused ("links table is not empty") | Second-AI review of the README | Rewrote the command block: smoke seed, then the 1M seed with `--reset --confirm-database`; added a note that `DATABASE_URL` stays pointed at the benchmark database for that window (my edit) |
 | E-32 | Task 10: the AI could not run the seeder or the 28 integration tests (including the rollback test), as in Tasks 3, 7, and 9 (E-12, E-26, E-28) | The AI's own report | I ran them: 213 passed, 0 skipped; the rollback test left 0 rows in the test database; I ran the 10K and 1M seeds and the guards myself |
+| E-33 | Task 11: the AI could not run the harness (no server or database in its shell), so no performance target had been measured when it reported done; the same limit as E-12, E-26, E-28, and E-32 | The AI's own report | I ran the load tests myself and everything came good |
+| E-34 | Task 11: the report-privacy test could never fail (it asserted that sentinel strings were absent from a report that never contained them), and the PASS/FAIL verdict logic and the "never send forwarded headers" rule had no tests | Second-AI review of the test file | Replaced the test; added tests for a slow p99, an unexpected status, a generator-limited run, the REPORTED_ONLY profiles, refusal of target URLs with credentials or paths, and a recording test that no forwarded header is sent (my edits) |
+| E-35 | Task 11: the runbook passed a database connection string to the harness, which only needed `--dataset-rows`; a README code fence from the seeding section was lost in my edit, so GitHub rendered the rest of the file as code; `.gitignore` had a duplicate `bench-results/` line | Second-AI review of the README and `.gitignore` | Switched the commands to `--dataset-rows`; restored the closing fence; removed the duplicate line (my edits) |
 
 ## Planning
 ### Prompt: 
