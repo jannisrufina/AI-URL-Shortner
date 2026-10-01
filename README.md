@@ -7,7 +7,7 @@ Development was AI-assisted; the process records are in `docs/`.
 
 ## Prerequisites
 
-- Python 3.11.9.
+- Python 3.11.9 on the PATH as python (the py launcher is optional)
 - Git.
 - PowerShell.
 - Docker Desktop with Docker Compose installed and running.
@@ -30,18 +30,21 @@ choosing any platform override.
    A correct result is a new `AI-URL-Shortner` directory with this README.
 
 2. Create and activate the virtual environment, then install the pinned runtime
-   and development requirements:
+   and development requirements. Check `python --version` first: it must print
+   3.11.x.
 
    ```powershell
-   py -3.11 -m venv .venv
+   python -m venv .venv
    Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
    .\.venv\Scripts\Activate.ps1
    python -m pip install -r requirements.txt -r requirements-dev.txt
    ```
 
-   A correct result is an activated `(.venv)` prompt and a successful pip
-   install. If activation is blocked, use `Set-ExecutionPolicy` above in this
-   PowerShell window only.
+   If `python` is not found or is the wrong version, install Python 3.11.9, or
+   use the Python launcher (`py -3.11 -m venv .venv`) if it is installed. A
+   correct result is an activated `(.venv)` prompt and a successful pip
+   install. If activation is blocked, `Set-ExecutionPolicy` above applies to
+   this PowerShell window only.
 
 3. Create the local environment file and set a local PostgreSQL password:
 

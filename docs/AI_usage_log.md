@@ -8,9 +8,9 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 - **Security practices:** no secrets or credentials in prompts; `.env` is ignored and only placeholder values are committed; the assignment text was shared once with the planning chat (Claude) to understand requirements and was not given to Copilot; every AI change was reviewed, tested, and run through the quality gates before I relied on it.
 - **Stages so far:**
   - Planning: requirements, design, tasks
-  - Tasks 1 to 13: quality gates and CI, architecture overview, app bootstrap, URL validation, create limiter, create API, redirects, create form, end-to-end tests, performance data seeder, load-test harness (create profile run; redirect profile [run / not run]), architecture reconciliation, OpenAPI export
-  - Next: Task 14 (setup instructions and a clean-checkout test)
-  - Still to do: Tasks 15 and 16 (the two scenarios), Task 17 (final summary)
+  - Tasks 1 to 14: quality gates and CI, architecture overview, app bootstrap, URL validation, create limiter, create API, redirects, create form, end-to-end tests, performance data seeder, load-test harness (create profile run; redirect profile not run), architecture reconciliation, OpenAPI export, setup instructions
+  - Next: Task 15 (brownfield scenario: click analytics)
+  - Still to do: Task 16 (ambiguous-requirement scenario), Task 17 (final summary)
 
 ## Decisions (what the AI proposed, what I chose, why)
 
@@ -65,8 +65,12 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | D-47 | OpenAPI completeness (Task 13) | The auto-generated spec was incomplete: `POST /api/links` reads its body by hand, so it had no request body, and no error responses were declared | The AI added decorator and constructor metadata only (title and version, one shared `Error` schema, request bodies for the JSON and form routes, response codes, the redirect `Location` header, the `code` parameter pattern as schema-only metadata); no handler body, dependency, exception registration, or route order changed | An accurate spec is the deliverable, and "no behavior change" is checked by reading the diff and by the unchanged test suite |
 | D-48 | Drift protection (Task 13) | `docs/openapi.json` is generated deterministically by `scripts/export_openapi.py`; `--check` and a test fail when the file differs from the routes | Accepted | The spec cannot silently go stale |
 | D-49 | How the spec describes the redirect route (Task 13) | The route is `GET /{code:path}` in code, but FastAPI documents it as `/{code}` | Accepted | The spec shows the simplified path; `architecture.md` records that the route also catches paths containing slashes |
+| D-50 | README structure (Task 14) | The AI restructured the README into an overview, prerequisites, a numbered quick start with an expected result under each step, common problems, quality checks and tests, seeding, load testing, API specification, limitations, and a repository map; existing seeding, load-testing, and API sections were kept | Accepted, with my edits (see E-41) | A new reader needs the setup in dependency order and a way to tell each step worked |
+| D-51 | Local versus deployment base URL (Task 14) | The quick start sets `PUBLIC_BASE_URL` to `http://127.0.0.1:8000` | Accepted; the README says a deployment sets the public hostname chosen for it | Returned short links are clickable on a local run; `jrb.sh` is the hostname the self-reference check was designed around |
+| D-52 | How the README states results (Task 14) | The limitations section says plainly that the redirect load profile was not run (NFR-3 not measured) and that the create profile ran once from one source address with 36 requests, so its p99 is statistically weak | Accepted | No claim in the README goes beyond what was measured |
+| D-53 | Repository address in the README (Task 14) | The AI read the clone URL from my git remote, so it contains my GitHub username | [Kept, because the repository is meant to be cloned / replaced with a placeholder] | [reason] |
 
-## AI errors and gaps I caught
+## Errors and gaps I caught (AI's and my own)
 
 | # | What the AI produced | Found via | Fix |
 |---|----------------------|-----------|-----|
@@ -110,6 +114,9 @@ _Summary, decision, error and sign-off sections added 2026-09-29 after the plann
 | E-38 | Task 13: the first generated redirect operation contained a duplicate `code` parameter (FastAPI's automatic one plus the custom one), and putting the regex in as a validation pattern would have turned a bad code into FastAPI's own 422 before the handler runs, changing the existing 404 behavior | The AI's own checks while generating | The regex went in as `json_schema_extra` on the path parameter, which documents the pattern without adding runtime validation; the redirect tests confirm 404 behavior is unchanged |
 | E-39 | Task 13: the AI could not run the 28 database tests, so "no behavior changed" was proved only against the unit and mocked-database tests; same limit as before (E-12, E-26, E-28, E-32) | The AI's own report | I ran the full suite against PostgreSQL: [241 passed, 0 skipped] |
 | E-40 | Task 13: the drift test compared parsed JSON, so a formatting or line-ending difference in the committed file would not have failed it; the "no secrets" test set environment variables that the spec never reads, so two of its assertions could not fail | Second-AI review of the test file | Added a byte-for-byte comparison test; rewrote the secrets test to check only values the spec could contain; added a title and version test (my edits) |
+| E-41 | Task 14: the README said step 6 "ends with the initial migration applied", but Alembic prints nothing on success here, so a new reader could not tell whether it worked; the "Common Problems" paths for the virtual environment were missing the leading dot (`\.venv\...`); the AI's first rewrite dropped the lock-regeneration steps and the quality-gate probe table, and when it restored them, two blocks were duplicated; nothing said that only Docker Compose reads `.env` or that `pip-audit` needs an internet connection | Second-AI review of the README, [and the clean-checkout test] | Replaced the expected result with a `\d links` check; fixed both paths; removed the duplicate blocks; added the `.env` sentence and the internet note (my edits) |
+| E-42 | Task 14 (my own slips): when I replaced step 6's sentence I deleted the `alembic upgrade head` command itself, so a new reader would never have created the table; my edits to step 6's code block lost its indentation (an editor or paste effect), which can break the numbered list; and I committed the AI draft together with my edits instead of committing the draft first | My read-through of the README, a second review, and `git status` | Restored the command and re-indented the block; committed once with a message listing which edits were mine |
+| E-43 | Task 14: the README's step 2 used the Python launcher (`py -3.11 -m venv .venv`), which is not installed on every machine (it was missing in my clean checkout), so no virtual environment was created and the activation step failed | Clean-checkout test | Step 2 now uses `python -m venv .venv`, checks `python --version`, and mentions the launcher as an alternative; Prerequisites updated |
 
 ## Planning
 ### Prompt: 
