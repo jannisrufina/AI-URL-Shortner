@@ -90,6 +90,8 @@ The analytics hook runs once only for a found, unexpired link. No cache is used.
 - IPv6 clients can rotate source addresses within a `/64` and obtain separate limiter buckets.
 - Numeric shorthand such as `127.1`, CGNAT addresses, and multicast ranges are accepted by the current parser/policy.
 - Unicode internationalized hostnames must be submitted as ASCII punycode; Unicode authority text is rejected.
+- Latency was measured only for the create profile (36 requests from one source address, so its p99 is statistically weak). Redirect latency (NFR-3) was not measured; the harness is built and tested but its redirect profile was not run.
+- Seeded benchmark rows use short synthetic URLs (about 38 characters), so the storage extrapolation to 10M rows (about 2.2 GB) understates real table size; index size does not depend on URL length.
 
 ## Deviations from design.md (for review)
 
@@ -108,5 +110,5 @@ The analytics hook runs once only for a found, unexpired link. No cache is used.
 
 ### Contradictions with requirements.md
 
-- **FR-6:** `127.1` is accepted as a hostname because it is not normalized by `ipaddress.ip_address`; clients commonly interpret it as loopback. This contradicts the requirement to reject loopback literals. CGNAT and multicast acceptance is an additional gap, but those ranges are not explicitly named by FR-6.
-- **NFR-3 and NFR-4 measurement:** requirements call for server-side p99. The supplied harness measures loopback end-to-end p99, which includes client scheduling and loopback overhead and is an upper bound, not the server-only value. It should be interpreted as a conservative proxy rather than an identical measurement.
+- **FR-6 and L-5:** `127.1` and similar shorthand forms are accepted because they are not normalized by `ipaddress.ip_address`; this is the documented limitation L-5, not a new gap. CGNAT and multicast acceptance is not covered by L-5 or named in FR-6, and is listed under additional known gaps.
+- **NFR-3 and NFR-4 measurement:** requirements call for server-side p99. The harness measures loopback end-to-end latency from the scheduled send time to the response, so it includes client scheduling and loopback overhead. A run whose end-to-end p99 is under the target therefore also has a server-side p99 under it; a miss is ambiguous and would need a server-side measurement to attribute.
