@@ -124,3 +124,54 @@ The commands above leave `DATABASE_URL` pointing at the benchmark database for
 the rest of that PowerShell window. Use a separate window for benchmarking, or
 set `DATABASE_URL` back to the main database before running the app or the
 tests. The generated `sample-codes*.txt` files are ignored by git.
+
+## Load testing
+
+Generate `sample-codes.txt` with the seeder first. In a dedicated server
+PowerShell window, point the app at the benchmark database, use the public base
+URL expected by the sample codes, retain the default pool settings, and start
+one worker without proxy-header handling:
+
+```powershell
+$env:DATABASE_URL = "postgresql://url_shortener:replace-with-a-local-password@localhost:5432/url_shortener_bench"
+$env:PUBLIC_BASE_URL = "http://127.0.0.1:8000"
+$env:DB_POOL_MAX_SIZE = "10"
+$env:DB_POOL_WAIT_MS = "250"
+python -m uvicorn url_shortener.app:app --host 127.0.0.1 --port 8000 --workers 1 --no-proxy-headers
+```
+
+In a second PowerShell window, run one profile per command. The harness reads
+the row count using the supplied benchmark connection, but never prints the
+connection string. Create and mixed runs bind the listed loopback addresses;
+ensure they are available locally. With only one address, create load is
+reduced to its compliant rate and p99 is marked statistically weak.
+
+```powershell
+$env:BENCH_DATABASE_URL = "postgresql://url_shortener:replace-with-a-local-password@localhost:5432/url_shortener_bench"
+python -m scripts.load_test --profile redirect-average --sample-codes-file sample-codes.txt --database-url $env:BENCH_DATABASE_URL --pool-max 10 --pool-wait-ms 250
+python -m scripts.load_test --profile redirect-peak --sample-codes-file sample-codes.txt --database-url $env:BENCH_DATABASE_URL --pool-max 10 --pool-wait-ms 250
+python -m scripts.load_test --profile create --database-url $env:BENCH_DATABASE_URL --source-addresses 127.0.0.1,127.0.0.2,127.0.0.3,127.0.0.4,127.0.0.5,127.0.0.6,127.0.0.7 --pool-max 10 --pool-wait-ms 250
+python -m scripts.load_test --profile mixed --sample-codes-file sample-codes.txt --database-url $env:BENCH_DATABASE_URL --source-addresses 127.0.0.1,127.0.0.2,127.0.0.3,127.0.0.4,127.0.0.5,127.0.0.6,127.0.0.7 --pool-max 10 --pool-wait-ms 250
+```
+
+For the overload profile, stop the server, restart it with pool maximum 1 and
+pool wait 50 ms, then run the overload command. Keep its results separate; they
+do not replace redirect-average for NFR-3.
+
+```powershell
+$env:DB_POOL_MAX_SIZE = "1"
+$env:DB_POOL_WAIT_MS = "50"
+python -m uvicorn url_shortener.app:app --host 127.0.0.1 --port 8000 --workers 1 --no-proxy-headers
+```
+
+```powershell
+python -m scripts.load_test --profile overload --sample-codes-file sample-codes.txt --database-url $env:BENCH_DATABASE_URL --pool-max 1 --pool-wait-ms 50
+```
+
+Use `--dataset-rows N` instead of `--database-url` to omit the harness's
+database count query. Reports are written as JSON and Markdown in
+`bench-results/`. This measures end-to-end latency on loopback, which is an
+upper bound for server-side latency (so it includes client scheduling and
+loopback overhead). Results depend on the machine. If a target is missed, report
+it as not met; peak and overload results never replace the average-load NFR-3
+run.

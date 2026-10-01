@@ -3267,3 +3267,404 @@ suite currently has 212 tests; report the new count. List every file changed
 and any decision I should review.
 
 #### Response:
+I’ll inspect the current seeder, its related tests, and the README section first; I’ll limit edits to the three files you authorized and won’t invoke the CLI or connect to any database. The intended files are `seed_links.py`, `test_seed_links.py`, and `README.md`.
+
+Ran terminal command: git status --short
+
+Searched for regex `Seeding benchmark data|sample-codes|optional|10,000,000` (`**/README.md`), 6 results
+
+Read 
+
+Read 
+
+The current bug is exactly as described: `_CREATED_AT_EPOCH` is year 2000, and expiry offsets are only 1–365 days. I’ll replace those constants with the specified 2026-09-01 anchor and 30–365-day range; the confirming check is a unit test asserting every non-null expiry falls within its own row’s bounds. I’m reading the full README section before editing its wording.
+
+Read , lines 95 to 122
+
+The README currently names sample-code files but doesn’t mention the count option. I’ll update both sample commands to use `--sample-codes-count` explicitly, document its 10,000 default, and add the exact partial-load recovery sentence; the code/tests changes remain limited to the two authorized Python files.
+
+Generating patch (91 lines) in , , 
+
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_seed_links.py -q
+
+The targeted tests pass (`17 passed`), including UTC timestamps within the anchor day, per-row 30–365-day expiry bounds, and writing all available codes when the requested sample exceeds the dataset. I’m running the full suite and all quality gates now; I’ll report the exact final total and changed-file list.
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+
+Ran terminal command: git diff --check
+Completed with input: git diff --check
+
+Ran terminal command: git status --short
+
+The final suite is **185 passed, 28 skipped (213 tests)**, and all four quality gates pass. The broad `git diff --check` reports trailing whitespace only in the pre-existing `AI_usage_log.md` edit, which is outside the allowed scope; I’m checking whitespace only on the three authorized files before wrapping up.
+
+Ran terminal command: git diff --check -- README.md scripts/seed_links.py tests/test_seed_links.py
+
+Updated the seed timestamps to use the 2026-09-01 UTC anchor and expiries 30–365 days after each row’s creation. Added the oversized sample-count test and documented `--sample-codes-count` and partial-load recovery.
+
+**Files changed:** `seed_links.py`, `test_seed_links.py`, `README.md`.
+
+**Verification:** **185 passed, 28 skipped (213 total)**; all four quality gates pass. Integration tests skipped because `TEST_DATABASE_URL` is unset. I did not run the seeder or touch a database.
+
+Whitespace checks pass for the three changed files. The unrestricted diff check reports trailing whitespace in the unrelated, pre-existing `AI_usage_log.md` edit; I left it untouched. No additional decision needs review.
+
+Made changes.
+
+## Task 11:
+### Prompt:
+This is a NEW task: Task 11. Tasks 1 through 10 are already committed. Do not
+summarize earlier tasks. Before writing any code, reply with the list of files
+you will create or change, then proceed.
+
+Task 11 from docs/tasks.md: Add and run performance/load tests. Read
+docs/tasks.md (Task 11), docs/requirements.md (NFR-1, NFR-3, NFR-4, NFR-5,
+A-4 to A-7), docs/design.md (Failure Behavior, Test Plan), and
+scripts/seed_links.py. Do not modify anything in docs/ or under
+url_shortener/, alembic/, or the schema. Do not commit or push. Do NOT start
+a server, connect to any database, or run a load test yourself: the machine
+you run on cannot do it. I will run everything. Write the harness, unit-test
+it, and document how I run it.
+
+Intent: a repeatable load harness that measures redirect and create latency
+against a locally running instance, with no cache, and reports honestly
+against the targets in NFR-3 and NFR-4.
+
+Scope: scripts/load_test.py (CLI) with testable functions; no new
+dependencies (httpx and asyncio are already available).
+- Open-loop load generation: requests are SCHEDULED at the offered rate
+  (constant arrival interval) and latency is measured from the scheduled send
+  time, so a slow server cannot hide its own latency (coordinated omission).
+  Record generator lag (actual send time minus scheduled time) and report it;
+  if the generator itself cannot sustain the offered rate, say so in the report
+  and mark the run "generator-limited".
+- Profiles (all selectable by flags, with these defaults):
+  1. redirect-average: 100 requests/second for 60 seconds (A-6 average), codes
+     drawn from the sample-codes file; every request must return 302. This run
+     is the NFR-3 pass/fail run (p99 below 200 ms).
+  2. redirect-peak: 1,000 requests/second for 30 seconds (A-6 peak), reported
+     separately and NEVER used as the pass/fail condition for NFR-3.
+  3. create: about 1 create/second (A-7) for at least 240 seconds using unique
+     synthetic URLs (https://loadtest.example/<unique>), pass/fail is p99 below
+     300 ms (NFR-4). The server's per-IP limiter allows 10 creates per rolling
+     minute per client IP, so the harness must respect it: support
+     --source-addresses (a comma list of local source IPs, for example
+     127.0.0.2,127.0.0.3, bound with httpx's local_address transport option) and
+     never exceed 9 creates per 60 seconds per source address. NEVER send
+     X-Forwarded-For, Forwarded, or X-Real-IP. If only one source address is
+     available, run at the compliant rate, report the small sample size, and say
+     p99 is statistically weak. A 429 is counted and reported, never hidden.
+  4. mixed (optional flag): 100 redirects per 1 create, per A-5, at the average
+     rate, within the same limiter constraint.
+  5. overload (separate profile, reported separately): the same redirect load
+     against a server I start with DB_POOL_MAX_SIZE=1 and DB_POOL_WAIT_MS=50;
+     report the status distribution (expect some 503s) and latency of 302s and
+     503s separately. These results never replace the normal-load results.
+- Report (printed, and written as JSON and Markdown to bench-results/, which is
+  gitignored; never write into docs/): date, a "machine" block with only OS
+  name and version, CPU model if available, logical core count, Python
+  version (no hostname, username, or paths), target base URL, the dataset size
+  (read it with one `SELECT count(*) FROM links` only if --database-url is given,
+  otherwise take it from a --dataset-rows flag), offered rate, achieved rate,
+  duration, request count, status distribution, error count, and p50, p95, p99,
+  and max latency in milliseconds, generator lag, the server pool settings I
+  pass in as flags (--pool-max, --pool-wait-ms, recorded as given), and a
+  verdict line for each pass/fail run. Never print URLs, codes beyond counts,
+  connection strings, or passwords.
+- Safety: refuse to run unless the target host is 127.0.0.1 or localhost,
+  unless --allow-remote is given; refuse offered rates above 5,000/second;
+  cap total requests per run.
+- README: add a "Load testing" section with exact PowerShell steps: the server
+  window (DATABASE_URL pointing at the benchmark database, PUBLIC_BASE_URL set
+  to http://127.0.0.1:8000, one Uvicorn worker, --no-proxy-headers, default pool
+  settings), the load window, one command per profile, the overload server
+  settings, and a plain statement that this measures end-to-end latency on
+  loopback, which is an upper bound for server-side latency (so it includes
+  client scheduling and loopback overhead), and that results depend on the
+  machine. State that the targets were not met if they are not met.
+
+Tests (tests/test_load_test.py; unit tests, no network and no database):
+- percentile calculation (known inputs, p99 of 100 values, empty input);
+- the open-loop schedule (correct number of requests, spacing, latency measured
+  from the scheduled time, generator lag computed);
+- the per-source-address creation limit (never more than 9 per 60 seconds);
+- status distribution counting, including 302, 429, 503, and timeouts;
+- report formatting: required fields present; no URL, password, hostname, or
+  username appears in the report or output (use sentinel strings);
+- the target-host refusal and the rate-cap refusal;
+- a smoke run of the harness against an in-process ASGI test app through
+  httpx.ASGITransport (a tiny fake app is fine) for about 2 seconds at a low
+  rate, asserting the report has the expected shape.
+
+Constraints: all four quality gates pass (python scripts/check.py) plus pytest;
+no global suppressions; no new dependencies; never implement a cache. If the
+load results miss a target, that is reported, not fixed here. The suite has 213
+tests; report the new count. List every file created or changed and any
+decision I should review.
+
+#### Response: 
+Files I expect to create: scripts/load_test.py and tests/test_load_test.py. I expect to change `README.md`. I’ll check whether `bench-results/` is already ignored before deciding whether `.gitignore` also needs an edit; I’ll read the requested Task 11 docs and current seeder first. I will not start a server, connect to a database, or run an external load test.
+
+Ran terminal command: git status --short
+
+Read , lines 205 to 245
+
+Read 
+
+Read , lines 85 to 127
+
+Read 
+
+Read 
+
+Read 
+
+Read , lines 140 to 188
+
+`bench-results/` is not currently ignored, so the final file list also needs `.gitignore` to keep generated reports out of version control. My first Task 11 read landed in Task 12; I’m correcting that targeted read before editing. The working hypothesis is a pure open-loop scheduler with injected transport/clock seams so the tests can verify schedule-based latency and run against ASGI without touching a network or database.
+
+Searched for text `## 11. Add and run performance/load tests` (`**/docs/tasks.md`), 1 result
+
+Read 
+
+Read , lines 1 to 80
+
+Read , lines 183 to 212
+
+Task 11’s exact criteria confirm the average redirect profile is the only NFR-3 verdict run; peak and overload remain separate reports, while create verdicts use NFR-4. Because `.gitignore` lacks `bench-results/`, I’ll include it in the final change list. I’ll create the harness and unit tests, document all four profile commands and the server/load windows, and keep all test traffic in-process through ASGI.
+
+Apply Patch
+
+Generating patch (597 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m py_compile scripts/load_test.py
+
+I’ve now confirmed `bench-results/` is not ignored, so the final changed-file list is `.gitignore`, `README.md`, plus the two new Python files. I’m finishing the harness tests for deterministic schedule/lag math, create-source caps, status/report redaction, safety guards, and a two-second in-process ASGI run; then I’ll document the server/load windows and overload profile.
+
+Generating patch (244 lines) in , , 
+
+
+```
+
+```
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_load_test.py -q
+Completed with input: & .\.venv\Scripts\python.exe -m pytest tests/test_load_test.py -q
+
+Generating patch (11 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_load_test.py -q
+Completed with input: & .\.venv\Scripts\python.exe -m pytest tests/test_load_test.py -q
+
+Generating patch (6 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_load_test.py -q
+
+The first harness test run found two test expectation mistakes, both corrected; the current load-test unit file passes (`10 passed`), including the 2-second ASGI-only smoke run. I’m doing a scope review before documentation: I’ll remove the optional output-directory override so CLI reports always go to the specified `bench-results/`, and I’ll have the report test capture printed Markdown as well as JSON.
+
+Generating patch (25 lines) in , 
+
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_load_test.py -q
+
+The report-path and stdout privacy checks are now in place, and the harness suite still passes (`10 passed`). I’m adding the README instructions with explicit server/load windows, one invocation for each profile, the required overload pool settings, and an honest interpretation of loopback latency and target verdicts.
+
+Generating patch (61 lines) in 
+
+
+```
+
+```
+The README now documents all requested profiles and the loopback caveat. Next I’m validating the new harness suite and project gates; these checks use only the test fake/ASGI transport and won’t start Uvicorn, use the real network, or connect to PostgreSQL.
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_load_test.py -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+
+Ran terminal command: git diff --check -- .gitignore README.md scripts/load_test.py tests/test_load_test.py
+
+Read , lines 1 to 360
+
+The new ASGI-only tests pass, but Ruff found style issues in the harness (mostly line wrapping plus a suppressible hostname parse). I’m applying the formatter/import sorter, while also tightening the limiter-aware schedule so it refuses rather than silently dropping a planned create if source assignment ever exceeds capacity.
+
+Generating patch (47 lines) in , 
+
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m ruff format scripts/load_test.py tests/test_load_test.py
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m ruff check --fix scripts/load_test.py tests/test_load_test.py
+Completed with input: & .\.venv\Scripts\python.exe -m ruff check --fix scripts/load_test.py tests/test_load_test.py
+
+Generating patch (39 lines) in 
+
+
+```
+
+```
+The harness and ASGI tests are in place; limiter planning now raises rather than silently omitting a create if its theoretical rate cap ever proves insufficient. The remaining Ruff findings were long Markdown-renderer string lines, which I’ve wrapped; I’m adding the documented PowerShell commands and then will run the complete suite and gates.
+
+Generating patch (60 lines) in , 
+
+
+```
+
+```
+
+```
+
+```
+The README patch tool accepted a corrected context after detecting a mismatch, so I’m verifying the current load-testing section to ensure it landed once and in the right place before finalizing. Then I’ll format the harness and rerun tests/gates.
+
+Read , lines 125 to 231
+
+The current README shows two overlapping load-testing blocks. I’ll inspect its diff against the committed version so I can remove only the duplicate added in this pass and preserve the existing instructions and any changes already present.
+
+Ran terminal command: git diff -- README.md
+
+Generating patch (64 lines) in 
+
+
+```
+
+```
+The diff confirmed the duplicate text was introduced by the corrected README patch, not present in the committed file. I removed only that duplicate and retained a single complete load-testing section; next I’m fixing the remaining formatter/lint findings in the harness.
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m ruff format scripts/load_test.py tests/test_load_test.py
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m ruff check --fix scripts/load_test.py tests/test_load_test.py
+Completed with input: & .\.venv\Scripts\python.exe -m ruff check --fix scripts/load_test.py tests/test_load_test.py
+
+Generating patch (11 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_load_test.py -q
+
+The duplicate README section is removed, and all 11 harness tests pass. Before the final gates I’m tightening two details: create profile durations under four minutes will be refused by the CLI (the internal ASGI smoke helper remains short), and generator lag will timestamp immediately before the HTTP call after constructing the unique create body.
+
+Generating patch (51 lines) in , 
+
+
+```
+
+```
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_load_test.py -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m ruff format scripts/load_test.py tests/test_load_test.py
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+
+Ran terminal command: git diff --check -- .gitignore README.md scripts/load_test.py tests/test_load_test.py
+
+Ran terminal command: git status --short
+
+The full suite is **197 passed, 28 skipped (225 total)**; the four non-mypy gates pass. Mypy found only a type mismatch in the fake ASGI app signature, so I’m annotating it with Starlette’s `Scope`, `Receive`, and `Send` types, then rerunning the smoke test and all gates.
+
+Generating patch (14 lines) in 
+
+
+```
+
+```
+
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest tests/test_load_test.py -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe -m pytest -q
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+
+Ran terminal command: git diff --check -- .gitignore README.md scripts/load_test.py tests/test_load_test.py
+
+Checked , , no problems found
+
+The final suite and all four gates now pass: **197 passed, 28 skipped**, with the 12 new harness tests included. I haven’t started a server, connected to a database, or run an external load test; I’m doing a final README-duplication and changed-file check only.
+
+Ran terminal command: git status --short
+
+Ran terminal command: git diff --check -- .gitignore README.md scripts/load_test.py tests/test_load_test.py
+
+Searched for text `## Load testing` (`**/README.md`), 1 result
+
+Implemented the load harness, unit tests, README runbook, and `bench-results/` ignore rule.
+
+**Files changed:** `.gitignore`, `README.md`.  
+**Files created:** `load_test.py`, `test_load_test.py`.
+
+**Verification:** **197 passed, 28 skipped (225 total)**; all four quality gates pass. The new smoke test uses only an in-process ASGI app. I did not start a server, connect to a database, or run an external load test, so no performance target has been measured.
+
+One interpretation to review: the report includes the required, sanitized target base URL; request URLs, codes, credentials, host machine name, username, and paths are not reported. A run is marked generator-limited if its maximum observed generator lag reaches one request-arrival interval.
+
+Made changes.
