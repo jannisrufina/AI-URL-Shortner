@@ -4,7 +4,7 @@ This document describes the initial prototype. Requirement references use the ID
 
 ## Components and Stack
 
-- **FastAPI application:** serves the JSON API, HTML form, validation, rate limiting, and redirect flow. **[FR-2, FR-3, FR-10, NFR-1]**
+- **FastAPI application:** serves the JSON API, HTML form, validation, rate limiting, redirect flow, and health endpoints. **[FR-2, FR-3, FR-10, FR-14, NFR-1]**
 - **Jinja templates:** render the single-page create form and its result. Keep autoescaping enabled and do not mark user-controlled values as safe. **[FR-10]**
 - **PostgreSQL:** source of truth for mappings. A primary-key index supports short-code lookup; a unique digest index provides same-URL reuse and concurrent-create arbitration. **[FR-1, FR-2, NFR-5, NFR-7]**
 - **One-service Docker Compose:** starts PostgreSQL only. Run the Python application as a single local process. **[NFR-1, NFR-6, L-1]**
@@ -104,7 +104,7 @@ Success response:
 
 `GET /livez` returns HTTP `200` with `{"status": "ok"}` and never touches the database; it is used to confirm the app process is alive.
 
-`GET /readyz` runs `SELECT 1 FROM links LIMIT 1` through the existing PostgreSQL pool and returns HTTP `200` with `{"status": "ok"}` when the query succeeds. If the pool cannot provide a connection, the connection fails, the statement times out, or the `links` table is missing, it returns the standard sanitized `503` error body used elsewhere. The readiness path logs only the exception class name (`Readiness check failed (UndefinedTable)`, for example), never a URL, SQL, or connection detail. The endpoints are not rate limited, do not record click analytics, and are registered before the dynamic redirect route so they cannot be mistaken for short codes. **[FR-14, NFR-2, NFR-6]**
+`GET /readyz` runs `SELECT 1 FROM links LIMIT 1` through the existing PostgreSQL pool and returns HTTP `200` with `{"status": "ok"}` when the query succeeds. If the query fails for any reason (pool wait, connection failure, statement timeout, or a missing `links` table), it returns the standard sanitized `503` error body used elsewhere. Any exception is treated as not ready (fail closed). The readiness path logs only the exception class name (`Readiness check failed (UndefinedTable)`, for example), never a URL, SQL, or connection detail. The endpoints are not rate limited, do not record click analytics, and are registered before the dynamic redirect route so they cannot be mistaken for short codes. **[FR-14, NFR-2, NFR-6]**
 
 ### Errors
 
@@ -179,6 +179,7 @@ Use an in-process sliding window keyed by direct client IP, storing request time
 - **Database timeout/pool tests:** verify bounded pool configuration, pool-acquisition timeout, connection timeout handling, statement timeout cancellation/rollback, and sanitized `503` responses. **[NFR-2, NFR-3, NFR-4, NFR-6]**
 - **Click analytics tests:** active redirects attempt one event; malformed, missing, and expired codes attempt none; typed insert failure and a missing event table still produce the original `302` and `Location`; migration upgrade/downgrade preserves `links`; the confirmed seeder `--reset` truncates `link_clicks` before `links`. **[FR-2, FR-8, FR-9, FR-13, NFR-2, NFR-8, L-7]**
 - **Performance test:** with a documented machine, dataset, and traffic profile, measure server-side p99 for redirects and creates. Use average redirect load in A-6 (about 100 requests/second) for the NFR-3 pass/fail result, including pool acquisition; measure peak load in A-6 (about 1,000 requests/second) separately and report it without using it as a pass/fail target. Include the expected 100:1 read-to-write ratio from A-5 in the mixed workload where practical. Measure creates under A-7. Benchmark indexed lookup at the expected data scale; if average-load redirect p99 misses 200 ms, evaluate caching as a later change. **[NFR-3, NFR-4, NFR-5, A-4, A-5, A-6, A-7, A-8]**
+- **Health check tests:** `/livez` returns 200 without database access; `/readyz` returns 200 against a healthy database, and a sanitized 503 for injected pool, connection and statement failures and for a missing `links` table, logging only the exception class name; both send `Cache-Control: no-store`, record no click, and are not treated as short codes by the catch-all route. **[FR-14, NFR-2]**
 
 ## Limitations
 
@@ -192,6 +193,7 @@ Use an in-process sliding window keyed by direct client IP, storing request time
 - A SHA-256 collision is not separately checked by design, consistent with the no-full-URL-comparison decision. **[NFR-7]**
 - If deployed behind a proxy while forwarded headers remain untrusted, all requests may appear to come from the proxy's IP and share one rate-limit bucket. **[NFR-1, L-6]**
 - Alternate decimal, hexadecimal, and octal-like IPv4 host spellings are not normalized and may bypass literal-IP classification. **[FR-6, L-5]**
+- `/readyz` checks only connectivity and the `links` table through the shared pool; it does not verify the migration revision or `link_clicks`, and under pool saturation it can report not ready. **[FR-14]**
 
 ## Assumptions for Review
 

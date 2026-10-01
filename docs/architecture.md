@@ -60,7 +60,7 @@ flowchart TD
     H -->|Inserted or write failed; warning logs code only| R["302 with unchanged stored URL in Location"]
 ```
 
-The click insert is attempted once only for a found, unexpired link. It stores the code and UTC timestamp, and its failure is caught locally so a valid redirect remains 302. No analytics are written for 404s. No cache is used. FastAPI’s documentation routes and fixed `GET /`, `POST /api/links`, and `POST /` routes are registered before the catch-all `GET /{code:path}` route. Unknown GET paths that reach it fail the code-format check and receive the standard JSON 404. **[FR-2, FR-8, FR-9, FR-13, NFR-2, NFR-5, NFR-6, NFR-8, L-3, L-7]**
+The click insert is attempted once only for a found, unexpired link. It stores the code and UTC timestamp, and its failure is caught locally so a valid redirect remains 302. No analytics are written for 404s. No cache is used. FastAPI’s documentation routes and fixed `GET /`, `POST /api/links`, `POST /`, `GET /livez`, and `GET /readyz` routes are registered before the catch-all `GET /{code:path}` route. Unknown GET paths that reach it fail the code-format check and receive the standard JSON 404. **[FR-2, FR-8, FR-9, FR-13, NFR-2, NFR-5, NFR-6, NFR-8, L-3, L-7]**
 
 ## Key Decisions
 
@@ -93,6 +93,7 @@ The click insert is attempted once only for a found, unexpired link. It stores t
 - Unicode internationalized hostnames must be submitted as ASCII punycode; Unicode authority text is rejected.
 - NFR-3 is **not met** on the development machine (Windows ARM, 8 cores, Docker PostgreSQL, one worker, pool 10): the 100/s redirect-average run failed with p99 2,328 ms (saturated, generator-limited). The service handled about 90/s with all 302 responses; a 99/s run already showed p99 1,495 ms. Clean runs were at 25 and 50 requests/second (25/s: p99 51.8 ms). No tuning was attempted. The create profile was run once from one source address with 36 requests, so its p99 is statistically weak. Baseline and saturation runs are recorded by the engineer in the AI usage log, outside the automated test suite.
 - Seeded benchmark rows use short synthetic URLs (about 38 characters), so the storage extrapolation to 10M rows (about 2.2 GB) understates real table size; index size does not depend on URL length.
+- `/readyz` checks only connectivity and the `links` table through the shared pool; it does not verify the migration revision or `link_clicks`, and under pool saturation it can report not ready.
 
 ## Deviations from design.md (for review)
 

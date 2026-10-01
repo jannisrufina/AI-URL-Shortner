@@ -425,7 +425,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     }
                 },
             },
-            503: {"model": Error, "description": "Service temporarily unavailable."},
         },
     )
     async def livez() -> JSONResponse:
@@ -452,7 +451,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def readyz(request: Request) -> JSONResponse:
         try:
             await run_in_threadpool(_readyz_query, request.app.state.database)
-        except Exception as exc:  # pragma: no cover - exercised by tests.
+        except Exception as exc:
             _LOGGER.warning("Readiness check failed (%s)", exc.__class__.__name__)
             response = _error_response(
                 503,

@@ -319,16 +319,6 @@
               }
             },
             "description": "Service is running."
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Service temporarily unavailable."
           }
         },
         "summary": "Liveness check"
