@@ -3675,3 +3675,172 @@ Implemented the load harness, unit tests, README runbook, and `bench-results/` i
 One interpretation to review: the report includes the required, sanitized target base URL; request URLs, codes, credentials, host machine name, username, and paths are not reported. A run is marked generator-limited if its maximum observed generator lag reaches one request-arrival interval.
 
 Made changes.
+
+## Task 12:
+### Prompt:
+This is a NEW task: Task 12. Tasks 1 through 11 are already committed. Do not
+summarize earlier tasks. Before changing anything, reply with the list of files
+you will change, then proceed.
+
+Task 12 from docs/tasks.md: Reconcile the architecture overview with the code
+as built. Read docs/architecture.md, docs/design.md, docs/requirements.md,
+docs/tasks.md (Task 12), and every file under url_shortener/ and alembic/,
+plus docker-compose.yml, scripts/, and .github/workflows/quality.yml. Change
+ONLY docs/architecture.md. Do not modify design.md, requirements.md,
+tasks.md, any code, or any test. Do not commit or push.
+
+Update architecture.md so it describes the code as built:
+- Components: add the form template and the security headers on HTML
+  responses, the validation module, the expiry parser, the links module, the
+  settings and database modules, and the pool and timeout configuration. Add a
+  short "Supporting tools" list (quality-gate script and CI workflow, the
+  benchmark data seeder, the load-test harness) stating that none of them is
+  part of the running service. Keep the document under roughly three pages.
+- Create flow (Mermaid): rate limit, then validation, then expiry parsing,
+  then the single upsert. A code collision (a violation of the links_pkey
+  constraint only) generates a NEW candidate code and retries, up to five
+  attempts, then 503. Show the 422, 429, and 503 outcomes. Add the form
+  variant (POST /) and state that both routes share one service function.
+- Redirect flow (Mermaid): code-format check before any database access,
+  lookup, expiry check (expires_at <= now is expired), the click-analytics
+  hook (a no-op) only for found and unexpired links, then 302; 404 for
+  malformed, missing, and expired; 503 for database failures, never 404.
+  Note that the route is GET /{code:path}, registered after GET / and
+  POST /api/links, and what that means for unknown GET paths.
+- Quote Mermaid labels that contain braces or slashes (for example
+  U["User requests /{code}"]) so they render on GitHub.
+- Key decisions: keep the existing ones and add: the ASCII hostname allowlist
+  and the rejection of backslashes, non-ASCII authority, and lone surrogates;
+  fixed-message error bodies that never echo input; run_in_threadpool for the
+  synchronous database calls; and the Alembic decision, labeled as a design
+  decision that no requirement mentions (do not cite NFR-6 or NFR-7 for it).
+- Known limitations: L-1 to L-6, plus a short "Additional known gaps (not in
+  requirements.md)" list: no request body size limit; the response expires_at
+  timezone follows the database; limiter memory bounded only by sweeps; IPv6
+  clients can rotate addresses within a /64; numeric shorthand hosts such as
+  127.1 and the CGNAT and multicast ranges are accepted; internationalized
+  hosts must be submitted as punycode.
+
+Then add a section "Deviations from design.md (for review)": a table of every
+place the built code differs from docs/design.md (routes, status codes, error
+codes and messages, validation rules, headers, anything else), each row with
+the file that shows it. Derive this from reading the code, do not guess, and
+do not edit design.md to hide a deviation. If you find a contradiction with
+requirements.md, list it separately.
+
+Constraints: use requirement IDs exactly as they appear in requirements.md;
+introduce no behavior the code does not have; all four quality gates must pass
+(python scripts/check.py). When done, list what you changed and every
+deviation and gap you found.
+
+#### Response:
+File I will change: `architecture.md` only. I’ll read the requested documents and enumerate the full contents of `url_shortener`, `alembic`, `scripts`, and `workflows` before editing, then derive any deviations directly from the implementations.
+
+Ran terminal command: git status --short
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read , lines 218 to 260
+
+Read 
+
+The requested directories contain seven Python modules, one template, Alembic config/environment/migration files, three scripts plus `__init__.py`, and the quality workflow. I’m reading every one now; after that I’ll map the actual routes, validation/error branches, headers, schema and tooling back against `design.md` and `requirements.md` before editing only the overview.
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+Read 
+
+The code supports the requested flow, and I found three material areas to call out rather than paper over: the redirect is a path-capturing route, startup opens the DB pool before serving requests, and the validation accepts `127.1` despite FR-6’s loopback rejection requirement. The load harness also measures scheduled-to-completion loopback latency, not server-only latency. I’m replacing only `architecture.md` with a concise built-state overview, explicit known gaps, and a source-grounded deviations table; no other file will be edited.
+
+Apply Patch
+
+Generating patch (182 lines) in 
+
+
+```
+
+```
+The architecture draft is in place. During source cross-check, one diagram edge was too broad: the app maps typed `DatabaseAccessError` failures (pool, connection, statement timeout) to 503, but does not catch arbitrary database exceptions. I’m narrowing that edge and recording this handler boundary in the deviations table before running the required gate script.
+
+Generating patch (11 lines) in 
+
+
+```
+
+```
+The 503 diagram now matches the actual exception handler and the table records the uncaught-error case. I’m running `check.py`, checking the overview’s length, and confirming the diff is limited to `architecture.md`; I will not alter other files or run anything against a database.
+
+Ran terminal command: & .\.venv\Scripts\python.exe scripts/check.py
+
+Ran terminal command: (Get-Content docs/architecture.md | Measure-Object -Line).Lines
+
+Ran terminal command: git diff --check -- docs/architecture.md
+
+Ran terminal command: git status --short
+
+Updated only `architecture.md`. It now describes the built components and routes, create and redirect flows, key decisions, L-1 through L-6, additional implementation gaps, and a source-grounded deviations table.
+
+**Deviations recorded**
+- Redirect routing uses `GET /{code:path}` rather than `GET /{code}`; invalid and unknown GET paths reaching it return JSON 404.
+- The implementation uses specific validation and error codes/messages, including `invalid_request`, `invalid_expiry`, `not_found`, `rate_limited`, and `service_unavailable`; malformed form parsing renders a fixed 422 HTML error.
+- URL validation adds backslash, non-ASCII authority, lone-surrogate, and ASCII-hostname restrictions; numeric shorthand such as `127.1` is accepted.
+- `PUBLIC_BASE_URL` validation does not restrict the scheme to HTTP(S).
+- HTML responses add `nosniff` and CSP headers.
+- Database pool connection failure during app startup prevents serving requests; request-time typed DB access failures return 503.
+- Only typed database access errors are normalized to 503; arbitrary database exceptions have no broad handler.
+- Retry exhaustion returns sanitized 503 without the sanitized operational log described in the design.
+- The load harness measures loopback end-to-end latency rather than isolated server-side latency.
+
+**Requirements contradictions**
+- **FR-6:** `127.1` passes validation although clients may interpret it as loopback. CGNAT and multicast acceptance are also noted as gaps, but those ranges are not explicitly named in FR-6.
+- **NFR-3 and NFR-4:** the harness’s loopback measurement includes client scheduling and loopback overhead; it is an upper bound, not the server-only p99.
+
+The additional gaps are documented in the architecture file: no body-size limit; response expiry timezone follows the DB session; limiter memory has no hard cardinality cap; IPv6 address rotation within a `/64` can split buckets; numeric shorthand, CGNAT and multicast acceptance; and punycode-only internationalized hostnames.
+
+All four quality gates passed. The document is 90 lines. The pre-existing edit to `AI_usage_log.md` was left untouched.
+
+Made changes.
